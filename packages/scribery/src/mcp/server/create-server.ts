@@ -1,0 +1,280 @@
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod/v4";
+
+import {
+    MCP_DEFAULT_RESULT_LIMIT,
+    MCP_MAXIMUM_CHUNK_PAGE_SIZE,
+    MCP_SERVER_NAME,
+    READ_ONLY_TOOL_ANNOTATIONS,
+} from "../constants/defaults.js";
+import type { ScriberyMcpServerOptions } from "../contracts/server.js";
+import { formatProjectSearchResult } from "../results/project-search-result.js";
+import { mcpToolFailure, mcpToolSuccess } from "../results/tool-result.js";
+import { McpCollectionService } from "../services/collection-service.js";
+import { McpProjectService } from "../services/project-service.js";
+import { resolveMcpToolAllowlist } from "../tools/tool-allowlist.js";
+
+const projectReference = z.string().trim().min(1).optional().describe(
+    "Project name or source root. Omit it when the server is configured for " +
+    "the project or only one project is available.",
+);
+const collectionReference = z.string().trim().min(1).optional().describe(
+    "Collection name. Omit it when the server is configured for the collection " +
+    "or only one collection is available.",
+);
+const query = z.string().trim().min(1).describe(
+    "Natural-language retrieval query.",
+);
+const codebaseQuery = z.string().trim().min(1).describe(
+    "Describe the implementation, behavior, or concept to find.",
+);
+const resultLimit = z.number().int().min(1).max(100).optional().describe(
+    `Maximum returned matches; defaults to ${MCP_DEFAULT_RESULT_LIMIT}.`,
+);
+const codebaseResultLimit = z.number().int().min(1).max(100).optional().describe(
+    "Maximum number of code excerpts to return.",
+);
+const contextFields = {
+    includeContext: z.boolean().optional().describe(
+        "Include neighboring chunks; defaults to true.",
+    ),
+    contextBefore: z.number().int().min(0).max(20).optional().describe(
+        "Neighbor chunks before each match; defaults to 1.",
+    ),
+    contextAfter: z.number().int().min(0).max(20).optional().describe(
+        "Neighbor chunks after each match; defaults to 1.",
+    ),
+    contextCharacters: z.number().int().min(1).max(100_000).optional().describe(
+        "Combined neighboring-context character budget; defaults to 4000.",
+    ),
+};
+const rerankingFields = {
+    rerank: z.boolean().optional().describe(
+        "Use the configured reranker; enabled automatically when available.",
+    ),
+    rerankCandidates: z.number().int().min(1).max(100).optional().describe(
+        "Semantic candidates considered by the configured reranker.",
+    ),
+};
+
+export function createScriberyMcpServer(
+    options: ScriberyMcpServerOptions,
+): McpServer {
+    const enabledTools = resolveMcpToolAllowlist(options.toolAllowlist);
+    const server = new McpServer(
+        { name: MCP_SERVER_NAME, version: options.version },
+        { instructions: createMcpInstructions(enabledTools) },
+    );
+    const projects = new McpProjectService(options);
+    const collections = new McpCollectionService(options);
+    const executeProjectSearch = async (
+        input: Parameters<McpProjectService["search"]>[0],
+        signal: AbortSignal,
+    ) => {
+        try {
+            const result = await projects.search(input, signal);
+            return mcpToolSuccess(result, formatProjectSearchResult(result));
+        } catch (error: unknown) {
+            return mcpToolFailure(error);
+        }
+    };
+
+    if (enabledTools.has("list_projects")) server.registerTool(
+        "list_projects",
+        {
+            title: "List projects",
+            description: "List available source projects.",
+            inputSchema: z.object({}),
+            annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
+        async () => {
+            try {
+                return mcpToolSuccess(await projects.listProjects());
+            } catch (error: unknown) {
+                return mcpToolFailure(error);
+            }
+        },
+    );
+
+    if (enabledTools.has("search_codebase")) {
+        server.registerTool(
+            "search_codebase",
+            {
+                title: "Search the codebase",
+                description:
+                    "Search this project's source code and documentation by meaning. " +
+                    "Use this first to locate implementations, understand behavior, " +
+                    "or find related code across files—even when a symbol or filename " +
+                    "is known. Call with only query; the project and current build are " +
+                    "already selected. Returns ranked excerpts with file paths, line " +
+                    "ranges, and surrounding context.",
+                inputSchema: z.object({
+                    query: codebaseQuery,
+                    limit: codebaseResultLimit,
+                }),
+                annotations: READ_ONLY_TOOL_ANNOTATIONS,
+            },
+            async (input, extra) =>
+                executeProjectSearch({
+                    query: input.query,
+                    ...(input.limit === undefined ? {} : { limit: input.limit }),
+                }, extra.signal),
+        );
+    }
+
+    if (enabledTools.has("inspect_project_chunks")) server.registerTool(
+        "inspect_project_chunks",
+        {
+            title: "Inspect file chunks",
+            description:
+                "Read more source from a file returned by search_codebase. " +
+                "Use this when a search excerpt does not contain enough of the file.",
+            inputSchema: z.object({
+                path: z.string().trim().min(1).describe(
+                    "Portable path relative to the project root.",
+                ),
+                project: projectReference,
+                build: z.string().trim().min(1).optional(),
+                start: z.number().int().min(0).optional().describe(
+                    "Zero-based chunk position at which to start; defaults to 0.",
+                ),
+                limit: z.number().int().min(1)
+                    .max(MCP_MAXIMUM_CHUNK_PAGE_SIZE).optional().describe(
+                        "Maximum chunks returned; defaults to 20 and is capped at 100.",
+                    ),
+            }),
+            annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
+        async (input) => {
+            try {
+                return mcpToolSuccess(await projects.chunks({
+                    path: input.path,
+                    ...(input.project === undefined
+                        ? {}
+                        : { projectReference: input.project }),
+                    ...(input.build === undefined
+                        ? {}
+                        : { indexBuildId: input.build }),
+                    ...(input.start === undefined ? {} : { start: input.start }),
+                    ...(input.limit === undefined ? {} : { limit: input.limit }),
+                }));
+            } catch (error: unknown) {
+                return mcpToolFailure(error);
+            }
+        },
+    );
+
+    if (enabledTools.has("list_collections")) server.registerTool(
+        "list_collections",
+        {
+            title: "List document collections",
+            description:
+                "List available document collections and their source counts.",
+            inputSchema: z.object({}),
+            annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
+        async () => {
+            try {
+                return mcpToolSuccess(await collections.listCollections());
+            } catch (error: unknown) {
+                return mcpToolFailure(error);
+            }
+        },
+    );
+
+    if (enabledTools.has("list_collection_sources")) server.registerTool(
+        "list_collection_sources",
+        {
+            title: "List collection sources",
+            description:
+                "List document titles, paths, media types, and tags for a collection.",
+            inputSchema: z.object({ collection: collectionReference }),
+            annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
+        async (input) => {
+            try {
+                return mcpToolSuccess(await collections.listSources(input.collection));
+            } catch (error: unknown) {
+                return mcpToolFailure(error);
+            }
+        },
+    );
+
+    if (enabledTools.has("search_collection")) server.registerTool(
+        "search_collection",
+        {
+            title: "Search a document collection",
+            description:
+                "Search a document collection by meaning. Returns ranked excerpts " +
+                "with source attribution and surrounding context.",
+            inputSchema: z.object({
+                query,
+                collection: collectionReference,
+                sources: z.array(z.string().trim().min(1)).optional().describe(
+                    "Optional source identifiers; only matching sources are searched.",
+                ),
+                tags: z.array(z.string().trim().min(1)).optional().describe(
+                    "Optional exact tags; only matching tagged sources are searched.",
+                ),
+                limit: resultLimit,
+                ...contextFields,
+                ...rerankingFields,
+            }),
+            annotations: READ_ONLY_TOOL_ANNOTATIONS,
+        },
+        async (input, extra) => {
+            try {
+                return mcpToolSuccess(await collections.search({
+                    query: input.query,
+                    ...(input.collection === undefined
+                        ? {}
+                        : { collectionReference: input.collection }),
+                    ...(input.sources === undefined
+                        ? {}
+                        : { sourceIds: input.sources }),
+                    ...(input.tags === undefined ? {} : { tags: input.tags }),
+                    ...(input.limit === undefined ? {} : { limit: input.limit }),
+                    ...(input.includeContext === undefined
+                        ? {}
+                        : { includeContext: input.includeContext }),
+                    ...(input.contextBefore === undefined
+                        ? {}
+                        : { contextBefore: input.contextBefore }),
+                    ...(input.contextAfter === undefined
+                        ? {}
+                        : { contextAfter: input.contextAfter }),
+                    ...(input.contextCharacters === undefined
+                        ? {}
+                        : { contextCharacters: input.contextCharacters }),
+                    ...(input.rerank === undefined
+                        ? {}
+                        : { rerank: input.rerank }),
+                    ...(input.rerankCandidates === undefined
+                        ? {}
+                        : { rerankCandidates: input.rerankCandidates }),
+                }, extra.signal));
+            } catch (error: unknown) {
+                return mcpToolFailure(error);
+            }
+        },
+    );
+
+    return server;
+}
+
+function createMcpInstructions(enabledTools: ReadonlySet<string>): string {
+    const instructions = [
+        "Use these tools to search and inspect source code and documentation.",
+        "Every tool is read-only and cannot change files, indexes, projects, " +
+            "collections, sources, or tags.",
+    ];
+
+    if (enabledTools.has("search_codebase")) {
+        instructions.push(
+            "Use search_codebase first for questions about source-code behavior, " +
+                "architecture, or implementation. It needs only a query.",
+        );
+    }
+
+    return instructions.join(" ");
+}

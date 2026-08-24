@@ -1,0 +1,1 @@
+export const PROJECT_INDEXING_EVENT_VERSION = 1;

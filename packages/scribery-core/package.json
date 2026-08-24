@@ -1,0 +1,35 @@
+{
+  "name": "scribery-core",
+  "version": "0.1.0",
+  "description": "Shared indexing, storage, embedding, and retrieval engine for Scribery",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@typescript/typescript6": "^6.0.2",
+    "@vscode/tree-sitter-wasm": "^0.3.1",
+    "ignore": "^7.0.6",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-gfm": "^3.1.0",
+    "micromark-extension-gfm": "^3.0.0",
+    "parse5": "^8.0.1",
+    "picomatch": "^4.0.5",
+    "postcss": "^8.5.23",
+    "postcss-scss": "^4.0.9"
+  },
+  "engines": { "node": ">=22.19.0" }
+}
+

@@ -1,0 +1,25 @@
+{
+  "name": "scribery-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace scribery-core && npm run build --workspace scribery-code && npm run build --workspace scribery-documents && npm run build --workspace scribery && npm run build --workspace scribery-tui",
+    "check:boundaries": "node scripts/check-package-boundaries.mjs",
+    "typecheck": "npm run build && npm run typecheck --workspaces --if-present",
+    "test": "npm run build && npm run check:boundaries && npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/picomatch": "^4.0.3",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

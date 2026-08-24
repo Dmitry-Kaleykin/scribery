@@ -1,0 +1,22 @@
+{
+  "name": "scribery-tui",
+  "version": "0.1.0",
+  "description": "Interactive terminal interface for Scribery",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": { "scribery-tui": "./dist/cli.js" },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json && node ../../scripts/mark-binaries-executable.mjs dist/cli.js",
+    "dev": "node --import tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "^0.84.0",
+    "@napi-rs/keyring": "^1.3.0",
+    "scribery": "0.1.0"
+  },
+  "engines": { "node": ">=22.19.0" }
+}
+

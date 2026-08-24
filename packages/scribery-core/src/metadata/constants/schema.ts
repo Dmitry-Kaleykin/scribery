@@ -1,0 +1,3 @@
+export const METADATA_SCHEMA_VERSION = 1;
+export const IDENTITY_SCHEMA_VERSION = 1;
+export const CONTENT_HASH_ALGORITHM = "sha256";
