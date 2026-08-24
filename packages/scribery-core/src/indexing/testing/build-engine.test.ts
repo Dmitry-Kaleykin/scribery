@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import {
+    CastChunkingStrategy,
+    SlidingWindowChunkingStrategy,
+    createInitialParserRegistry,
+} from "../../chunking/index.js";
+import { DefaultFileClassifier } from "../../classification/index.js";
+import { DefaultDocumentDecoder } from "../../decoding/index.js";
 import { DeterministicFakeEmbeddingProvider } from "../../embeddings/index.js";
 import {
     createRepositoryId,
@@ -10,6 +17,9 @@ import {
 import type { PreparedSourceSnapshot } from "../../sources/index.js";
 import { InMemoryStorageProvider } from "../../storage/index.js";
 import { IndexBuildEngine } from "../build-engine.js";
+import type {
+    DocumentProcessingRuntime,
+} from "../contracts/document-processing-runtime.js";
 import type { IndexingPolicy } from "../contracts/policy.js";
 
 const castPolicy: IndexingPolicy = {
@@ -28,6 +38,7 @@ describe("IndexBuildEngine", () => {
         const result = await new IndexBuildEngine(
             storage,
             new DeterministicFakeEmbeddingProvider(8),
+            createTestRuntime(),
         ).build({
             source: snapshot("memory.ts", bytes),
             plan: {
@@ -55,6 +66,7 @@ describe("IndexBuildEngine", () => {
         const result = await new IndexBuildEngine(
             storage,
             new DeterministicFakeEmbeddingProvider(8),
+            createTestRuntime(),
         ).build({
             source: snapshot("notes.txt", bytes),
             plan: {
@@ -70,7 +82,7 @@ describe("IndexBuildEngine", () => {
         assert.ok(result.indexedChunks > 1);
     });
 
-    it("indexes project Markdown with the default cAST policy", async () => {
+    it("indexes project Markdown with an injected cAST runtime", async () => {
         const bytes = new TextEncoder().encode(
             "# Project\n\nUseful setup and architecture documentation.\n",
         );
@@ -78,6 +90,7 @@ describe("IndexBuildEngine", () => {
         const result = await new IndexBuildEngine(
             storage,
             new DeterministicFakeEmbeddingProvider(8),
+            createTestRuntime(),
         ).build({
             source: snapshot("README.md", bytes),
             plan: {
@@ -91,6 +104,23 @@ describe("IndexBuildEngine", () => {
         assert.ok(result.indexedChunks > 0);
     });
 });
+
+function createTestRuntime(): DocumentProcessingRuntime {
+    const parserRegistry = createInitialParserRegistry();
+
+    return {
+        identity: "test:document-processing-v1",
+        classifier: new DefaultFileClassifier(),
+        decoder: new DefaultDocumentDecoder(),
+        parserRegistry,
+        createChunkingStrategies: ({ slidingWindowOverlap }) => [
+            new CastChunkingStrategy(parserRegistry),
+            new SlidingWindowChunkingStrategy({
+                overlapSize: slidingWindowOverlap,
+            }),
+        ],
+    };
+}
 
 function snapshot(
     path: string,

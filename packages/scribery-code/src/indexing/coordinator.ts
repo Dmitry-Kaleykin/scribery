@@ -14,6 +14,7 @@ import {
 } from "scribery-core";
 import { ProjectSourceProvider } from "../sources/index.js";
 import { CodeOnlyIndexingPolicy } from "./policies/code-only.js";
+import { createCodeProcessingRuntime } from "./runtime.js";
 
 export class IndexingCoordinator {
     readonly #storage: StorageProvider;
@@ -88,6 +89,7 @@ export class IndexingCoordinator {
         return new IndexBuildEngine(
             this.#storage,
             this.#embeddingProvider,
+            createCodeProcessingRuntime(),
         ).build({
             source,
             plan: {

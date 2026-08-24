@@ -8,6 +8,7 @@ import {
 import { ARTIFACT_COMPATIBILITY_VERSION } from "../constants/build.js";
 
 export interface ArtifactCompatibilityIdentityInput {
+    documentProcessingRuntimeIdentity: string;
     chunkingIdentities: readonly string[];
     parserIdentities: readonly string[];
     modelIdentity: EmbeddingModelIdentity;
@@ -20,6 +21,8 @@ export function createArtifactCompatibilityHash(
 
     return hashText(JSON.stringify({
         version: ARTIFACT_COMPATIBILITY_VERSION,
+        documentProcessingRuntimeIdentity:
+            input.documentProcessingRuntimeIdentity,
         chunkingIdentities: [...new Set(input.chunkingIdentities)].sort(),
         parserIdentities: [...new Set(input.parserIdentities)].sort(),
         embeddingFormatterVersion: EMBEDDING_FORMATTER_VERSION,

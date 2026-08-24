@@ -1,14 +1,10 @@
 import {
-    CastChunkingStrategy,
-    SlidingWindowChunkingStrategy,
     type ChunkingStrategy,
-    createInitialParserRegistry,
 } from "../../chunking/index.js";
 import {
-    DefaultFileClassifier,
     type FileClassification,
 } from "../../classification/index.js";
-import { DefaultDocumentDecoder, type ByteSource } from "../../decoding/index.js";
+import { type ByteSource } from "../../decoding/index.js";
 import {
     EmbeddingService,
     formatDocumentEmbeddingInput,
@@ -45,6 +41,9 @@ import {
 } from "../constants/build.js";
 import type { IndexBuildPlan } from "../contracts/build-engine.js";
 import type {
+    DocumentProcessingRuntime,
+} from "../contracts/document-processing-runtime.js";
+import type {
     IndexingDiagnostic,
     IndexingProgress,
     IndexingProgressActivity,
@@ -72,7 +71,8 @@ export interface DocumentProcessingRequest {
     indexBuildId: string;
     plan: IndexBuildPlan;
     resolvedPlan: ResolvedIndexBuildPlan;
-    parserRegistry: ReturnType<typeof createInitialParserRegistry>;
+    runtime: DocumentProcessingRuntime;
+    chunkingStrategies: ReadonlyMap<string, ChunkingStrategy>;
     diagnostics: IndexingDiagnostic[];
 }
 
@@ -105,13 +105,8 @@ export class PreparedDocumentProcessor {
     async process(
         request: DocumentProcessingRequest,
     ): Promise<DocumentProcessingResult> {
-        const { source, plan, resolvedPlan, parserRegistry } = request;
-        const classifier = new DefaultFileClassifier();
-        const decoder = new DefaultDocumentDecoder();
-        const cast = new CastChunkingStrategy(parserRegistry);
-        const sliding = new SlidingWindowChunkingStrategy({
-            overlapSize: resolvedPlan.slidingWindowOverlap,
-        });
+        const { source, plan, resolvedPlan, runtime } = request;
+        const { classifier, decoder, parserRegistry } = runtime;
         const pendingChunks: PendingChunkEmbedding[] = [];
         const plannedDocuments: Array<PlannedDocument | undefined> = [];
         let indexedDocuments = 0;
@@ -296,9 +291,14 @@ export class PreparedDocumentProcessor {
                     encodingSelection: planned.encodingSelection,
                     bytes: bytesFrom(planned.document.bytes),
                 }, plan.signal === undefined ? {} : { signal: plan.signal });
-                const strategy: ChunkingStrategy = planned.strategyId === "cast"
-                    ? cast
-                    : sliding;
+                const strategy = request.chunkingStrategies.get(
+                    planned.strategyId,
+                );
+                if (strategy === undefined) {
+                    throw new Error(
+                        `Runtime does not provide strategy ${planned.strategyId}`,
+                    );
+                }
                 emitDocumentProgress(
                     plan,
                     documentIndex,

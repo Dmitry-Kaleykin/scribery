@@ -22,6 +22,11 @@ export type {
     IndexBuildRequest,
     IndexBuildResult,
 } from "./contracts/build-engine.js";
+export type {
+    DocumentParserRegistry,
+    DocumentProcessingRuntime,
+    DocumentProcessingRuntimeOptions,
+} from "./contracts/document-processing-runtime.js";
 export type { PendingChunkEmbedding } from "./contracts/pending-chunk.js";
 export { selectSearchableChunks } from "./chunks/select-searchable-chunks.js";
 export {
@@ -62,4 +67,3 @@ export {
     createArtifactCompatibilityHash,
     type ArtifactCompatibilityIdentityInput,
 } from "./identities/artifact-compatibility.js";
-

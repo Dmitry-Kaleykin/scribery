@@ -37,9 +37,10 @@ diagnostics rather than embeddings.
 
 `ManagedCollectionSourceProvider` converts the collection manifest and copied
 bytes into the same prepared-source contract used by project indexing. The shared
-`IndexBuildEngine` then owns classification, decoding, chunking, reuse,
-embeddings, storage, and publication; collections do not maintain a parallel
-indexing pipeline.
+The collection package injects its classification, decoding, parser, and
+chunking runtime into the shared `IndexBuildEngine`. Core then owns build
+orchestration, reuse, embeddings, storage, and publication; collections do not
+maintain a parallel indexing pipeline.
 
 Retrieval accepts an optional hard source scope. An omitted scope searches the
 whole collection, while an explicitly empty source or tag list returns no results.

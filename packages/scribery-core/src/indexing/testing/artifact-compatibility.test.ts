@@ -14,11 +14,13 @@ const model: EmbeddingModelIdentity = {
 describe("artifact compatibility identity", () => {
     it("is canonical across parser and chunking identity order", () => {
         const first = createArtifactCompatibilityHash({
+            documentProcessingRuntimeIdentity: "runtime-v1",
             chunkingIdentities: ["sliding-v1:100:20", "cast-v1:100"],
             parserIdentities: ["parser-b", "parser-a"],
             modelIdentity: model,
         });
         const reordered = createArtifactCompatibilityHash({
+            documentProcessingRuntimeIdentity: "runtime-v1",
             chunkingIdentities: ["cast-v1:100", "sliding-v1:100:20"],
             parserIdentities: ["parser-a", "parser-b"],
             modelIdentity: {
@@ -34,25 +36,35 @@ describe("artifact compatibility identity", () => {
 
     it("changes with an artifact-producing identity", () => {
         const baseline = createArtifactCompatibilityHash({
+            documentProcessingRuntimeIdentity: "runtime-v1",
             chunkingIdentities: ["cast-v1:100"],
             parserIdentities: ["parser-v1"],
             modelIdentity: model,
         });
 
         assert.notEqual(baseline, createArtifactCompatibilityHash({
+            documentProcessingRuntimeIdentity: "runtime-v1",
             chunkingIdentities: ["cast-v1:101"],
             parserIdentities: ["parser-v1"],
             modelIdentity: model,
         }));
         assert.notEqual(baseline, createArtifactCompatibilityHash({
+            documentProcessingRuntimeIdentity: "runtime-v1",
             chunkingIdentities: ["cast-v1:100"],
             parserIdentities: ["parser-v2"],
             modelIdentity: model,
         }));
         assert.notEqual(baseline, createArtifactCompatibilityHash({
+            documentProcessingRuntimeIdentity: "runtime-v1",
             chunkingIdentities: ["cast-v1:100"],
             parserIdentities: ["parser-v1"],
             modelIdentity: { ...model, model: "fixture-v2" },
+        }));
+        assert.notEqual(baseline, createArtifactCompatibilityHash({
+            documentProcessingRuntimeIdentity: "runtime-v2",
+            chunkingIdentities: ["cast-v1:100"],
+            parserIdentities: ["parser-v1"],
+            modelIdentity: model,
         }));
     });
 });

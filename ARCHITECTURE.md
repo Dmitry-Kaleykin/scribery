@@ -15,17 +15,17 @@ scribery <- scribery-tui
 packages may share persisted build and artifact formats only through core
 contracts.
 
-## Compatibility-first migration
+## Runtime composition
 
-The first milestone preserves the behavior of the reference implementations
-while establishing package ownership. Public compatibility is provided by the
-`scribery` facade, which re-exports the three library packages and hosts the CLI
-and MCP binaries.
+`IndexBuildEngine` is product-neutral orchestration. Its caller must inject a
+`DocumentProcessingRuntime`, which supplies classification, decoding, parser
+lookup, and available chunking strategies.
 
-The core build engine currently ships the established classifier and parser
-registry so the migration does not change chunk identities. A later internal
-step will inject the document-processing runtime into the engine. That change
-must preserve artifact compatibility identities or explicitly version them.
+`scribery-code` composes the code runtime with cAST chunking. The independent
+`scribery-documents` runtime composes cAST plus sliding-window chunking. Runtime
+identity participates in artifact compatibility, so changing any artifact-
+producing capability requires a new runtime identity and cannot silently reuse
+incompatible artifacts.
 
 ## Product boundaries
 
@@ -39,4 +39,3 @@ targets, and future live indexing are code-product concerns.
 Collections, directory synchronization, source tags, and future structured
 document extraction are document-product concerns. A directory is a source
 adapter rather than the name of the product.
-

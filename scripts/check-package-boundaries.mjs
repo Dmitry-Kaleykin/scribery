@@ -17,6 +17,17 @@ const rules = [
     },
 ];
 const failures = [];
+const coreOrchestrationFiles = [
+    "packages/scribery-core/src/indexing/build-engine.ts",
+    "packages/scribery-core/src/indexing/documents/document-processor.ts",
+];
+const forbiddenCoreCompositions = [
+    "CastChunkingStrategy",
+    "SlidingWindowChunkingStrategy",
+    "DefaultFileClassifier",
+    "DefaultDocumentDecoder",
+    "createInitialParserRegistry",
+];
 
 for (const rule of rules) {
     const root = new URL(`${rule.directory}/`, workspaceRoot);
@@ -32,6 +43,18 @@ for (const rule of rules) {
                     `${relative(workspaceRoot.pathname, file.pathname)} imports ${dependency}`,
                 );
             }
+        }
+    }
+}
+
+for (const relativePath of coreOrchestrationFiles) {
+    const file = new URL(relativePath, workspaceRoot);
+    const source = await readFile(file, "utf8");
+    for (const composition of forbiddenCoreCompositions) {
+        if (source.includes(composition)) {
+            failures.push(
+                `${relativePath} composes concrete runtime capability ${composition}`,
+            );
         }
     }
 }

@@ -12,6 +12,9 @@
   `SCRIBERY_TUI_HOME`.
 - Gave Scribery builds their own implementation identity so they cannot be
   confused with builds from the reference application.
+- Injected document-processing runtimes into `IndexBuildEngine`; code and
+  document packages now independently compose their parser and chunking
+  capabilities.
 
 ## Intentionally not migrated
 
@@ -19,19 +22,9 @@ Scribery does not read or modify `~/.blue-scribes`. The old applications and
 their indexes remain an independent reference installation. A deliberate import
 tool can be designed later if retaining old generated indexes becomes useful.
 
-## Next architectural step
-
-`IndexBuildEngine` still composes the established classifier, decoder, parser
-registry, and chunking strategies internally. This preserves exact behavior and
-artifact identities for the initial migration. The next refactor should introduce
-an injected document-processing runtime so core orchestration no longer chooses
-concrete parsers. Code and document packages can then register their own runtime
-capabilities without depending on one another.
-
 ## Deferred features
 
 - PDF, DOCX, and legacy DOC extraction;
 - branch-aware live code indexing;
 - watched directory synchronization for document libraries;
 - import or migration of legacy generated state.
-

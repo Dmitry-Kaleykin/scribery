@@ -1,4 +1,4 @@
-import { createInitialParserRegistry } from "../chunking/index.js";
+import type { ChunkingStrategy } from "../chunking/index.js";
 import {
     EMBEDDING_FORMATTER_VERSION,
     EmbeddingService,
@@ -29,6 +29,10 @@ import type {
     IndexBuildResult,
 } from "./contracts/build-engine.js";
 import type {
+    DocumentProcessingRuntime,
+} from "./contracts/document-processing-runtime.js";
+import type { IndexingStrategy } from "./contracts/policy.js";
+import type {
     IndexingDiagnostic,
     IndexingProgress,
 } from "./contracts/coordinator.js";
@@ -42,19 +46,26 @@ import { createArtifactCompatibilityHash } from "./identities/artifact-compatibi
 export class IndexBuildEngine {
     readonly #storage: StorageProvider;
     readonly #embeddingService: EmbeddingService;
+    readonly #runtime: DocumentProcessingRuntime;
 
     constructor(
         storage: StorageProvider,
         embeddingProvider: EmbeddingProvider,
+        runtime: DocumentProcessingRuntime,
     ) {
         this.#storage = storage;
         this.#embeddingService = new EmbeddingService(embeddingProvider);
+        this.#runtime = runtime;
     }
 
     async build(request: IndexBuildRequest): Promise<IndexBuildResult> {
         const { source, plan } = request;
         const resolvedPlan = resolveIndexBuildPlan(plan);
-        const parserRegistry = createInitialParserRegistry();
+        const chunkingStrategies = resolveChunkingStrategies(
+            this.#runtime,
+            plan.strategies,
+            resolvedPlan.slidingWindowOverlap,
+        );
         const diagnostics: IndexingDiagnostic[] = source.diagnostics.map(
             (diagnostic) => ({
                 stage: "discovery",
@@ -72,12 +83,14 @@ export class IndexBuildEngine {
                 : resolvedPlan.slidingChunkingIdentity
         );
         const artifactCompatibilityHash = createArtifactCompatibilityHash({
+            documentProcessingRuntimeIdentity: this.#runtime.identity,
             chunkingIdentities,
-            parserIdentities: parserRegistry.parserIds(),
+            parserIdentities: this.#runtime.parserRegistry.parserIds(),
             modelIdentity: this.#embeddingService.provider.identity,
         });
         const configurationHash = hashText(JSON.stringify({
             applicationVersion: APPLICATION_VERSION,
+            documentProcessingRuntimeIdentity: this.#runtime.identity,
             artifactCompatibilityHash,
             policyIdentity: plan.policyIdentity,
             strategies: [...plan.strategies].sort(),
@@ -164,7 +177,8 @@ export class IndexBuildEngine {
                 indexBuildId,
                 plan,
                 resolvedPlan,
-                parserRegistry,
+                runtime: this.#runtime,
+                chunkingStrategies,
                 diagnostics,
             });
             emitProgress(plan, {
@@ -255,6 +269,43 @@ export class IndexBuildEngine {
     }
 }
 
+function resolveChunkingStrategies(
+    runtime: DocumentProcessingRuntime,
+    requiredStrategies: readonly IndexingStrategy[],
+    slidingWindowOverlap: number,
+): ReadonlyMap<string, ChunkingStrategy> {
+    if (runtime.identity.trim().length === 0) {
+        throw new IndexingError(
+            "invalid-configuration",
+            "Document processing runtime identity must not be empty",
+        );
+    }
+
+    const strategies = new Map<string, ChunkingStrategy>();
+    for (const strategy of runtime.createChunkingStrategies({
+        slidingWindowOverlap,
+    })) {
+        if (strategies.has(strategy.id)) {
+            throw new IndexingError(
+                "invalid-configuration",
+                `Document processing runtime provides duplicate strategy ${strategy.id}`,
+            );
+        }
+        strategies.set(strategy.id, strategy);
+    }
+
+    for (const strategy of requiredStrategies) {
+        if (!strategies.has(strategy)) {
+            throw new IndexingError(
+                "invalid-configuration",
+                `Document processing runtime does not provide strategy ${strategy}`,
+            );
+        }
+    }
+
+    return strategies;
+}
+
 function emitProgress(plan: IndexBuildPlan, progress: IndexingProgress): void {
     plan.onProgress?.(progress);
 }
@@ -265,4 +316,3 @@ function sourceLabel(source: PreparedSourceSnapshot): string {
     }
     return source.provenance.root;
 }
-

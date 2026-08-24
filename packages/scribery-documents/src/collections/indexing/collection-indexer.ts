@@ -7,6 +7,7 @@ import {
     type EmbeddingProvider,
 } from "scribery-core";
 import { TextAndCodeIndexingPolicy } from "../../indexing/index.js";
+import { createDocumentsProcessingRuntime } from "../../indexing/runtime.js";
 import type {
     CollectionBuildOptions,
     CollectionBuildProgress,
@@ -51,6 +52,7 @@ export class CollectionIndexer {
             const result = await new IndexBuildEngine(
                 storage,
                 this.#provider,
+                createDocumentsProcessingRuntime(),
             ).build({
                 source,
                 plan: {
