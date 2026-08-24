@@ -78,20 +78,22 @@ export class ProjectIndexingService {
                 managedDatabasePath(root, this.#indexesDirectory),
         );
         const provider = await this.#embeddingProvider(request.provider);
-        emit(request, {
-            type: "provider-diagnostic",
-            state: "started",
-            model: provider.identity.model,
-            dimensions: provider.identity.dimensions,
-        });
-        const diagnostic = await diagnoseEmbeddingProvider(provider, {
-            ...(request.signal === undefined ? {} : { signal: request.signal }),
-        });
-        emit(request, {
-            type: "provider-diagnostic",
-            state: "completed",
-            result: diagnostic,
-        });
+        if (request.diagnoseProvider !== false) {
+            emit(request, {
+                type: "provider-diagnostic",
+                state: "started",
+                model: provider.identity.model,
+                dimensions: provider.identity.dimensions,
+            });
+            const diagnostic = await diagnoseEmbeddingProvider(provider, {
+                ...(request.signal === undefined ? {} : { signal: request.signal }),
+            });
+            emit(request, {
+                type: "provider-diagnostic",
+                state: "completed",
+                result: diagnostic,
+            });
+        }
 
         await mkdir(dirname(databasePath), { recursive: true });
         const project = await writeManagedProjectManifest(
@@ -163,7 +165,7 @@ export class ProjectIndexingService {
             });
         }
 
-        const recipe = project === undefined
+        const recipe = project === undefined || request.persistRecipe === false
             ? undefined
             : await this.#recipes.write(
                 project.projectIdentifier,

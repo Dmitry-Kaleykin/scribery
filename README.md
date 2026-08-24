@@ -19,7 +19,7 @@ Git-aware code retrieval and managed document collections.
 - `scribery-core` owns immutable snapshots and builds, metadata, storage,
   embeddings, reranking, generic discovery, decoding, chunking, and retrieval.
 - `scribery-code` owns Git working trees, code indexing policy, managed projects,
-  indexing recipes, and retrieval targets.
+  indexing recipes, retrieval targets, and branch-aware live indexing.
 - `scribery-documents` owns managed collections, document sources, tags, and the
   text-and-code collection policy.
 - `scribery` composes both products into the command-line and MCP interfaces.
@@ -39,4 +39,3 @@ npm install
 npm run build
 npm test
 ```
-

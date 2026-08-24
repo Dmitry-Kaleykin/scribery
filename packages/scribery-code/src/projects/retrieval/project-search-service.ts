@@ -8,6 +8,7 @@ import type {
     ProjectSearchRequest,
     ProjectSearchResult,
 } from "../contracts/project-search.js";
+import { ProjectLiveIndexingStateCatalog } from "../live/live-state-catalog.js";
 import { managedIndexesDirectory } from "../managed/paths.js";
 import { ProjectRetrievalTargetService } from "./retrieval-target-service.js";
 
@@ -21,6 +22,7 @@ export interface ProjectSearchServiceOptions {
 export class ProjectSearchService {
     readonly #profiles: ProviderProfileService;
     readonly #targets: ProjectRetrievalTargetService;
+    readonly #liveStates: ProjectLiveIndexingStateCatalog;
     readonly #apiKey: string | undefined;
     readonly #fetch: typeof globalThis.fetch | undefined;
 
@@ -32,10 +34,10 @@ export class ProjectSearchService {
             ...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
             ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
         });
-        this.#targets = new ProjectRetrievalTargetService({
-            indexesDirectory: options.indexesDirectory ??
-                managedIndexesDirectory(),
-        });
+        const indexesDirectory = options.indexesDirectory ??
+            managedIndexesDirectory();
+        this.#targets = new ProjectRetrievalTargetService({ indexesDirectory });
+        this.#liveStates = new ProjectLiveIndexingStateCatalog(indexesDirectory);
         this.#apiKey = options.apiKey;
         this.#fetch = options.fetch;
     }
@@ -57,6 +59,12 @@ export class ProjectSearchService {
         if (selection === undefined) {
             throw new Error(
                 `Indexed project ${project.projectIdentifier} has no ready build`,
+            );
+        }
+        if (request.indexBuildId === undefined) {
+            await this.#liveStates.assertReady(
+                project.projectIdentifier,
+                selection.indexBuildId,
             );
         }
         const profile = request.profile === undefined

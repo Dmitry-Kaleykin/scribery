@@ -4,6 +4,7 @@ import type {
     ProjectChunkInspectionRequest,
     ProjectChunkInspectionResult,
 } from "../contracts/project-inspection.js";
+import { ProjectLiveIndexingStateCatalog } from "../live/live-state-catalog.js";
 import { managedIndexesDirectory } from "../managed/paths.js";
 import { ProjectRetrievalTargetService } from "./retrieval-target-service.js";
 
@@ -13,12 +14,13 @@ export interface ProjectInspectionServiceOptions {
 
 export class ProjectInspectionService {
     readonly #targets: ProjectRetrievalTargetService;
+    readonly #liveStates: ProjectLiveIndexingStateCatalog;
 
     constructor(options: ProjectInspectionServiceOptions = {}) {
-        this.#targets = new ProjectRetrievalTargetService({
-            indexesDirectory: options.indexesDirectory ??
-                managedIndexesDirectory(),
-        });
+        const indexesDirectory = options.indexesDirectory ??
+            managedIndexesDirectory();
+        this.#targets = new ProjectRetrievalTargetService({ indexesDirectory });
+        this.#liveStates = new ProjectLiveIndexingStateCatalog(indexesDirectory);
     }
 
     async chunks(
@@ -38,6 +40,12 @@ export class ProjectInspectionService {
         if (selection === undefined) {
             throw new Error(
                 `Indexed project ${project.projectIdentifier} has no ready build`,
+            );
+        }
+        if (request.indexBuildId === undefined) {
+            await this.#liveStates.assertReady(
+                project.projectIdentifier,
+                selection.indexBuildId,
             );
         }
         const storage = new SqliteStorageProvider(project.databasePath, {

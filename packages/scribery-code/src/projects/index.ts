@@ -34,6 +34,13 @@ export type {
     ProjectIndexingRequest,
 } from "./contracts/project-indexing.js";
 export type {
+    ProjectLiveIndexingEvent,
+    ProjectLiveIndexingPhase,
+    ProjectLiveIndexingReason,
+    ProjectLiveIndexingRequest,
+    ProjectLiveIndexingStatus,
+} from "./contracts/live-indexing.js";
+export type {
     ProjectChunkInspectionRequest,
     ProjectChunkInspectionResult,
 } from "./contracts/project-inspection.js";
@@ -60,6 +67,21 @@ export {
     ProjectIndexingService,
     type ProjectIndexingServiceOptions,
 } from "./indexing/project-indexing-service.js";
+export {
+    ProjectLiveIndexingService,
+    type ProjectLiveIndexingServiceOptions,
+} from "./live/project-live-indexing-service.js";
+export {
+    LIVE_INDEXING_STATE_FILENAME,
+    LIVE_INDEXING_STATE_VERSION,
+    LIVE_INDEXING_STALE_AFTER_MILLISECONDS,
+    ProjectLiveIndexingStateCatalog,
+} from "./live/live-state-catalog.js";
+export {
+    liveBranchTarget,
+    liveTargetName,
+    type LiveBranchTarget,
+} from "./live/live-target.js";
 export {
     ProviderProfileRenameService,
     type ProviderProfileRenameResult,

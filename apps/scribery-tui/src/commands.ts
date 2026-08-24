@@ -2,6 +2,7 @@ import type { SlashCommand } from "@earendil-works/pi-tui";
 
 export const COMMANDS: readonly SlashCommand[] = [
     { name: "index", description: "Create an up-to-date index for the active project" },
+    { name: "live", description: "Keep the current Git branch indexed automatically" },
     { name: "project", description: "Switch or inspect an indexed project" },
     { name: "search", description: "Search with a guided query prompt" },
     { name: "profile", description: "Select, create, test, or remove provider profiles" },

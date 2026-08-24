@@ -115,3 +115,45 @@ compatibility.
 
 Collections have their own active builds and source tags. Project retrieval
 targets do not participate in collection lookup, filtering, or lifecycle.
+
+## Branch-aware live indexing
+
+`ProjectLiveIndexingService` watches one existing managed Git project and
+automatically owns targets under the `live/` namespace. A normal branch maps
+directly to a readable project-local target:
+
+```text
+release7 -> live/release7
+task123  -> live/task123
+```
+
+Detached and unborn worktrees receive explicit fallback target names. Branch
+names that cannot be represented safely as retrieval targets are deterministically
+slugged with a short hash, so distinct Git refs cannot silently collide.
+
+The service responds to recursive filesystem events (excluding `.git` and
+`node_modules`) and polls the complete Git working-tree fingerprint. Events are
+debounced for 750 ms by default. Only one build runs at a time, and events that
+arrive during it are coalesced. Live builds allow dirty worktrees, reuse existing
+artifacts, diagnose the provider once per live session, and do not overwrite the
+project's saved manual indexing recipe.
+
+Publication is deliberately two-phase: Scribery first creates an immutable
+ready build without changing a target, then verifies that the branch and full
+Git fingerprint still match. Only then does it assign and activate the
+`live/<branch>` target. It verifies the worktree again after publication and
+never marks an obsolete generation ready. A failed or superseded build cannot
+advance a live target.
+
+The current session state is written atomically to
+`~/.scribery/indexes/<project-identifier>/live-indexing.json` and refreshed by
+a heartbeat. Implicit search and chunk inspection fail closed while a fresh
+session is pending, indexing, failed, or points at a build other than the active
+selection. An explicit immutable `indexBuildId` remains available for deliberate
+historical inspection. Stopped and expired sessions no longer gate retrieval.
+
+Live targets are preserved across branch switches and service shutdown. Because
+each target references an immutable build, switching away from unfinished work
+requires no cleanup: its last successful `live/<branch>` target remains until it
+is advanced or manually removed. The initial TUI integration runs the service
+in the foreground and stops it with the TUI; it does not install a daemon.

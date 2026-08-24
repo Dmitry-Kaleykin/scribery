@@ -32,7 +32,9 @@ incompatible artifacts.
 ### Code
 
 Git state, branches, dirty working trees, project recipes, named retrieval
-targets, and future live indexing are code-product concerns.
+targets, and branch-aware live indexing are code-product concerns. The TUI owns
+the foreground service lifetime, while `scribery-code` owns change detection,
+stable build publication, live target naming, and retrieval freshness gates.
 
 ### Documents
 

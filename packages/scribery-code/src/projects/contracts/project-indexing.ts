@@ -16,6 +16,8 @@ import type { ManagedProjectManifest } from "../managed/manifest.js";
 export interface ProjectIndexingRequest extends ProjectIndexingSettings {
     root: string;
     databasePath?: string;
+    diagnoseProvider?: boolean;
+    persistRecipe?: boolean;
     signal?: AbortSignal;
     onEvent?: (event: ProjectIndexingEvent) => void;
 }

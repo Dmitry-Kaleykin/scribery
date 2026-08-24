@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 
@@ -25,6 +25,7 @@ import {
     normalizeRetrievalTargetName,
     ProjectIndexingService,
     ProjectInspectionService,
+    ProjectLiveIndexingService,
     ProjectRetrievalTargetService,
     ProviderProfileRenameService,
     ProjectSearchService,
@@ -38,6 +39,8 @@ import {
     type CollectionSummary,
     type OpenAiCompatibleModelSummary,
     type ProjectIndexingEvent,
+    type ProjectLiveIndexingEvent,
+    type ProjectLiveIndexingStatus,
     type ProviderProfile,
     type ProviderProfileInput,
     type RetrievalResult,
@@ -81,6 +84,15 @@ interface ProposedIndexConfiguration {
     presetValue: IndexingPreset;
 }
 
+interface ProposedLiveConfiguration {
+    projectIdentifier: string;
+    root: string;
+    profile: string;
+    preset: string;
+    keepReplacedBuilds: number;
+    presetValue: IndexingPreset;
+}
+
 export interface ScriberyTuiAppOptions {
     cwd?: string;
     preferences?: ProjectPreferenceStore;
@@ -115,12 +127,20 @@ export class ScriberyTuiApp {
     #activeProject: IndexedProjectSummary | undefined;
     #activePreference: ProjectPreference | undefined;
     #activeJob: ActiveJob | undefined;
+    #live: ProjectLiveIndexingService | undefined;
+    #liveStatus: ProjectLiveIndexingStatus | undefined;
+    #liveConfiguration: ProposedLiveConfiguration | undefined;
+    #liveProgress: IndexingProgress | undefined;
+    #lastLiveReadyPublication: string | undefined;
+    #lastLiveFailure: string | undefined;
+    #livePublicationChain: Promise<void> = Promise.resolve();
     #progress: IndexingProgressComponent | undefined;
     #progressTimer: NodeJS.Timeout | undefined;
     #lastInterrupt = 0;
     #stopping = false;
     #modalActive = false;
     #cancelPromptActive = false;
+    #terminalSuspended = false;
     #credentialAvailability: Promise<boolean> | undefined;
     #resolveRun?: () => void;
 
@@ -183,6 +203,7 @@ export class ScriberyTuiApp {
     async #runCommand(name: string, argument: string): Promise<void> {
         switch (name) {
             case "index": await this.#configureAndIndex(); break;
+            case "live": await this.#manageLive(argument); break;
             case "project": await this.#selectProject(argument); break;
             case "search": await this.#promptSearch(); break;
             case "profile": await this.#manageProfiles(argument); break;
@@ -229,7 +250,7 @@ export class ScriberyTuiApp {
                 results: response.results,
                 requestRender: () => this.#ui.requestRender(),
                 onDone: () => this.#ui.setFocus(this.#editor),
-                onOpen: (result) => this.#openSearchResult(result),
+                onOpen: (result) => { void this.#openSearchResult(result); },
             });
             this.#transcript.addChild(component);
             this.#transcript.addChild(new Spacer(1));
@@ -246,6 +267,10 @@ export class ScriberyTuiApp {
     }
 
     async #configureAndIndex(): Promise<void> {
+        if (this.#live?.running) {
+            this.#append("Stop live indexing with /live stop before running a manual index.", "warning");
+            return;
+        }
         if (this.#activeJob) {
             this.#append(`An index is already running for ${basename(this.#activeJob.root)}.`, "warning");
             return;
@@ -407,7 +432,296 @@ export class ScriberyTuiApp {
         this.#progress = undefined;
     }
 
+    async #manageLive(argument = ""): Promise<void> {
+        const requestedAction = argument.toLowerCase();
+        if (requestedAction === "status") {
+            this.#showLiveStatus();
+            return;
+        }
+        if (requestedAction === "stop") {
+            await this.#stopLive();
+            return;
+        }
+        if (requestedAction === "reconcile") {
+            this.#reconcileLive();
+            return;
+        }
+        if (requestedAction && requestedAction !== "start") {
+            throw new Error("Usage: /live [start|status|reconcile|stop]");
+        }
+
+        if (this.#live?.running) {
+            const action = await this.#pick("Live indexing", [
+                { value: "status", label: "Show status", description: this.#liveStatus?.phase ?? "starting" },
+                { value: "reconcile", label: "Index now", description: "Reconcile without waiting for another file event" },
+                { value: "stop", label: "Stop live indexing", description: "Keep the last published branch target" },
+            ]);
+            if (action?.value === "status") this.#showLiveStatus();
+            else if (action?.value === "reconcile") this.#reconcileLive();
+            else if (action?.value === "stop") await this.#stopLive();
+            return;
+        }
+        if (requestedAction === "reconcile" || requestedAction === "stop") {
+            this.#append("Live indexing is not running in this TUI.", "muted");
+            return;
+        }
+        if (this.#activeJob) {
+            this.#append("Wait for the current indexing operation to finish before starting live mode.", "warning");
+            return;
+        }
+        const project = this.#activeProject;
+        if (!project?.root) {
+            this.#append("Create the first project index with /index before starting live mode.", "warning");
+            return;
+        }
+        const profiles = await this.#profiles.list();
+        const presets = await this.#presets.list();
+        if (profiles.length === 0 || presets.length === 0) {
+            this.#append("Live indexing needs an existing provider profile and indexing preset.", "warning");
+            return;
+        }
+        let profileName = profiles.some(({ name }) => name === this.#activePreference?.profile)
+            ? this.#activePreference!.profile
+            : undefined;
+        let presetName = presets.some(({ name }) => name === this.#activePreference?.preset)
+            ? this.#activePreference!.preset
+            : undefined;
+        if (!profileName) profileName = await this.#pickProfile(profiles, "Select live indexing profile");
+        if (!profileName) return;
+        if (!presetName) presetName = await this.#pickPreset(presets, "Select live indexing preset");
+        if (!presetName) return;
+
+        while (true) {
+            const action = await this.#pick("Start live indexing", [
+                { value: "start", label: "Start live indexing", description: `${profileName} · ${presetName}` },
+                { value: "profile", label: "Change profile", description: profileName },
+                { value: "preset", label: "Change preset", description: presetName },
+                { value: "cancel", label: "Cancel" },
+            ]);
+            if (!action || action.value === "cancel") return;
+            if (action.value === "start") break;
+            if (action.value === "profile") {
+                profileName = await this.#pickProfile(profiles, "Select live indexing profile", profileName) ?? profileName;
+            } else if (action.value === "preset") {
+                presetName = await this.#pickPreset(presets, "Select live indexing preset") ?? presetName;
+            }
+        }
+
+        const configuration: ProposedLiveConfiguration = {
+            projectIdentifier: project.projectIdentifier,
+            root: project.root,
+            profile: profileName,
+            preset: presetName,
+            keepReplacedBuilds: this.#activePreference?.keepReplacedBuilds ?? 1,
+            presetValue: presets.find(({ name }) => name === presetName)!,
+        };
+        void this.#startLive(configuration);
+    }
+
+    async #startLive(configuration: ProposedLiveConfiguration): Promise<void> {
+        const service = new ProjectLiveIndexingService(
+            apiKeyOptions(await this.#apiKey(configuration.profile)),
+        );
+        this.#live = service;
+        this.#liveConfiguration = configuration;
+        this.#liveStatus = undefined;
+        this.#liveProgress = undefined;
+        this.#lastLiveReadyPublication = undefined;
+        this.#lastLiveFailure = undefined;
+        this.#append(
+            `Starting live indexing for ${basename(configuration.root)}. The current Git branch will publish to live/<branch>.`,
+            "muted",
+        );
+        this.#updateHeader();
+        try {
+            await service.start({
+                root: configuration.root,
+                projectReference: configuration.projectIdentifier,
+                provider: { type: "profile", profile: configuration.profile },
+                keepReplacedBuilds: configuration.keepReplacedBuilds,
+                ...(configuration.presetValue.maximumChunkSize === undefined
+                    ? {}
+                    : { maximumChunkSize: configuration.presetValue.maximumChunkSize }),
+                ...(configuration.presetValue.windows1251 === undefined
+                    ? {}
+                    : { windows1251: configuration.presetValue.windows1251 }),
+                ...(configuration.presetValue.include === undefined
+                    ? {}
+                    : { include: configuration.presetValue.include }),
+                ...(configuration.presetValue.exclude === undefined
+                    ? {}
+                    : { exclude: configuration.presetValue.exclude }),
+                onEvent: (event) => this.#onLiveEvent(event),
+            });
+        } catch (error: unknown) {
+            if (this.#live === service) {
+                await service.stop().catch(() => {});
+                this.#live = undefined;
+                this.#liveConfiguration = undefined;
+                this.#stopProgress();
+                this.#ui.terminal.setProgress(false);
+                this.#updateHeader();
+            }
+            this.#appendError(error);
+        }
+    }
+
+    #onLiveEvent(event: ProjectLiveIndexingEvent): void {
+        if (event.type === "indexing") {
+            this.#onLiveIndexEvent(event.event);
+            return;
+        }
+        const status = event.status;
+        this.#liveStatus = status;
+        if (status.phase === "pending") this.#liveProgress = undefined;
+        if (!this.#terminalSuspended) {
+            if (status.phase === "pending" || status.phase === "indexing" || status.phase === "starting") {
+                this.#ensureLiveProgress(status);
+            } else {
+                this.#stopProgress();
+                this.#ui.terminal.setProgress(false);
+            }
+        }
+        if (status.phase === "ready" && status.indexBuildId !== undefined) {
+            this.#livePublicationChain = this.#livePublicationChain
+                .catch(() => {})
+                .then(() => this.#acceptLiveReady(status))
+                .catch((error: unknown) => this.#appendError(error));
+        } else if (status.phase === "failed") {
+            const failure = `${status.generation}:${status.error?.message ?? "unknown failure"}`;
+            if (failure !== this.#lastLiveFailure) {
+                this.#lastLiveFailure = failure;
+                this.#append(
+                    `Live indexing failed for ${status.branch ?? "the worktree"}: ${status.error?.message ?? "unknown failure"}. Retrieval is paused until a successful retry.`,
+                    "warning",
+                );
+            }
+        }
+        this.#updateHeader();
+    }
+
+    #ensureLiveProgress(status: ProjectLiveIndexingStatus): void {
+        if (!this.#progress) {
+            this.#progress = new IndexingProgressComponent();
+            this.#progressArea.addChild(this.#progress);
+            this.#progressTimer = setInterval(() => {
+                this.#progress?.tick();
+                if (!this.#terminalSuspended) this.#ui.requestRender();
+            }, 90);
+        }
+        this.#progress.setState({
+            stage: "provider",
+            message: status.phase === "pending"
+                ? `Waiting for changes to settle · ${status.target ?? "live target"}`
+                : `Preparing ${status.target ?? "live target"}`,
+        });
+        if (status.phase === "indexing" && this.#liveProgress !== undefined) {
+            this.#progress.setState({ stage: "indexing", progress: this.#liveProgress });
+        }
+        this.#ui.terminal.setProgress(true);
+        this.#ui.requestRender();
+    }
+
+    #onLiveIndexEvent(event: ProjectIndexingEvent): void {
+        const previous = this.#liveProgress;
+        if (event.type === "indexing-progress") this.#liveProgress = event.progress;
+        if (this.#terminalSuspended || !this.#progress) return;
+        if (event.type === "provider-diagnostic") {
+            this.#progress.setState({
+                stage: "provider",
+                message: event.state === "started" ? `Checking ${event.model}` : "Provider ready",
+            });
+        } else if (event.type === "indexing-progress") {
+            this.#progress.setState({ stage: "indexing", progress: event.progress });
+            if (shouldRenderIndexingProgressImmediately(previous, event.progress)) {
+                this.#ui.renderNow();
+                return;
+            }
+        } else if (event.type === "target-publication") {
+            this.#progress.setState({ stage: "provider", message: `Publishing ${event.target}` });
+        }
+        this.#ui.requestRender();
+    }
+
+    async #acceptLiveReady(status: ProjectLiveIndexingStatus): Promise<void> {
+        const configuration = this.#liveConfiguration;
+        const publication = status.target === undefined || status.indexBuildId === undefined
+            ? undefined
+            : `${status.target}:${status.indexBuildId}`;
+        if (
+            configuration === undefined ||
+            status.indexBuildId === undefined ||
+            status.target === undefined ||
+            publication === this.#lastLiveReadyPublication
+        ) return;
+        this.#lastLiveFailure = undefined;
+        await this.#preferences.set({
+            projectIdentifier: configuration.projectIdentifier,
+            root: configuration.root,
+            profile: configuration.profile,
+            preset: configuration.preset,
+            target: status.target,
+            keepReplacedBuilds: configuration.keepReplacedBuilds,
+            allowDirty: true,
+        });
+        this.#lastLiveReadyPublication = publication;
+        await this.#refreshProjects(configuration.projectIdentifier);
+        this.#append(
+            `✓ Live index ready for ${status.branch ?? "the worktree"} · ${status.target ?? "live target"} · build ${status.indexBuildId.slice(0, 12)}…`,
+            "success",
+        );
+    }
+
+    #reconcileLive(): void {
+        const service = this.#live;
+        if (!service?.running) {
+            this.#append("Live indexing is not running in this TUI.", "muted");
+            return;
+        }
+        this.#append("Live reconciliation requested.", "muted");
+        void service.reconcile().catch((error: unknown) => this.#appendError(error));
+    }
+
+    async #stopLive(): Promise<void> {
+        const service = this.#live;
+        if (!service?.running) {
+            this.#append("Live indexing is not running in this TUI.", "muted");
+            return;
+        }
+        await service.stop();
+        await this.#livePublicationChain;
+        if (this.#live === service) {
+            this.#live = undefined;
+            this.#liveConfiguration = undefined;
+            this.#liveProgress = undefined;
+        }
+        this.#stopProgress();
+        this.#ui.terminal.setProgress(false);
+        this.#updateHeader();
+        this.#append("Live indexing stopped. The last ready branch target remains available.", "success");
+    }
+
+    #showLiveStatus(): void {
+        const status = this.#liveStatus;
+        if (status === undefined || status.phase === "stopped") {
+            this.#append("Live indexing is not running in this TUI.", "muted");
+            return;
+        }
+        this.#append([
+            `Live indexing ${status.phase}`,
+            `Project: ${status.root}`,
+            `Branch: ${status.branch ?? "unknown"}`,
+            `Target: ${status.target ?? "pending"}`,
+            `Build: ${status.indexBuildId?.slice(0, 12) ?? "pending"}`,
+            `Updated: ${relativeTime(status.updatedAt)}`,
+        ].join("\n"));
+    }
+
     async #selectProject(argument = ""): Promise<void> {
+        if (this.#live?.running && argument !== "info") {
+            this.#append("Stop live indexing with /live stop before switching or forgetting projects.", "warning");
+            return;
+        }
         await this.#refreshProjects();
         if (argument === "info") {
             const project = this.#requiredProject();
@@ -472,6 +786,18 @@ export class ScriberyTuiApp {
                     ].filter((item) => `${item.value} ${item.label} ${item.description ?? ""}`.toLowerCase().includes(prefix.toLowerCase())),
                 };
             }
+            if (command.name === "live") {
+                return {
+                    ...command,
+                    argumentHint: "[start|status|reconcile|stop]",
+                    getArgumentCompletions: (prefix: string) => [
+                        { value: "start", label: "start", description: "Start branch-aware live indexing" },
+                        { value: "status", label: "status", description: "Show the current live state" },
+                        { value: "reconcile", label: "reconcile", description: "Index the worktree now" },
+                        { value: "stop", label: "stop", description: "Stop and preserve the last live target" },
+                    ].filter((item) => item.value.includes(prefix.toLowerCase())),
+                };
+            }
             if (command.name === "profile") {
                 return {
                     ...command,
@@ -529,6 +855,10 @@ export class ScriberyTuiApp {
     }
 
     async #manageProfiles(argument = ""): Promise<void> {
+        if (this.#live?.running) {
+            this.#append("Stop live indexing before changing provider profiles.", "warning");
+            return;
+        }
         const profiles = await this.#profiles.list();
         const direct = argument ? profiles.find(({ name }) => name === argument) : undefined;
         const profileItems = await Promise.all(profiles.map(async (profile) => ({
@@ -1045,6 +1375,10 @@ export class ScriberyTuiApp {
     }
 
     async #managePresets(argument = ""): Promise<void> {
+        if (this.#live?.running) {
+            this.#append("Stop live indexing before changing indexing presets.", "warning");
+            return;
+        }
         const presets = await this.#presets.list();
         const direct = argument ? presets.find(({ name }) => name === argument) : undefined;
         const selection = direct ? { value: direct.name, label: direct.name } : await this.#pick("Indexing presets", [
@@ -1253,6 +1587,10 @@ export class ScriberyTuiApp {
     }
 
     async #manageTargets(): Promise<void> {
+        if (this.#live?.running) {
+            this.#append("Live mode owns the active retrieval target. Stop it before changing targets manually.", "warning");
+            return;
+        }
         const project = this.#requiredProject();
         const listing = await this.#targets.list(project.projectIdentifier, this.#cwd);
         const targets = Array.isArray(listing.targets) ? listing.targets.filter(isRecord) : [];
@@ -1395,6 +1733,10 @@ export class ScriberyTuiApp {
         collection: CollectionSummary,
         profileName: string,
     ): Promise<void> {
+        if (this.#live?.running) {
+            this.#append("Stop live indexing before starting another indexing operation.", "warning");
+            return;
+        }
         if (this.#activeJob) {
             this.#append(`An index is already running for ${basename(this.#activeJob.root)}.`, "warning");
             return;
@@ -1540,6 +1882,16 @@ export class ScriberyTuiApp {
     }
 
     #showJobs(): void {
+        if (this.#live?.running && this.#liveStatus !== undefined) {
+            const status = this.#liveStatus;
+            this.#append([
+                `Live indexing ${status.root}`,
+                `Phase: ${status.phase} · generation ${status.generation}`,
+                `Branch: ${status.branch ?? "unknown"} · target ${status.target ?? "pending"}`,
+                `Updated: ${relativeTime(status.updatedAt)}`,
+            ].join("\n"));
+            return;
+        }
         if (!this.#activeJob) {
             this.#append("No indexing operation is running.", "muted");
             return;
@@ -1552,7 +1904,7 @@ export class ScriberyTuiApp {
         ].join("\n"));
     }
 
-    #openSearchResult(result: RetrievalResult): void {
+    async #openSearchResult(result: RetrievalResult): Promise<void> {
         const root = this.#activeProject?.root;
         if (!root) {
             this.#append("Only project search results can be opened in a local editor.", "warning");
@@ -1566,15 +1918,43 @@ export class ScriberyTuiApp {
         const locationArguments = ["code", "code-insiders", "codium", "cursor"].includes(editorName)
             ? ["--goto", `${path}:${result.range.startLine}`]
             : [`+${result.range.startLine}`, path];
+        if (this.#activeJob) {
+            this.#append("Wait for the current manual index to finish before opening an external editor.", "warning");
+            return;
+        }
+        this.#terminalSuspended = true;
         this.#ui.stop({ preserveScreen: true });
+        let failure: unknown;
         try {
-            spawnSync(command, [...configuredArguments, ...locationArguments], {
-                stdio: "inherit",
+            await new Promise<void>((resolveEditor, rejectEditor) => {
+                const child = spawn(command, [...configuredArguments, ...locationArguments], {
+                    stdio: "inherit",
+                });
+                child.once("error", rejectEditor);
+                child.once("exit", (code, signal) => {
+                    if (code === 0 || signal !== null) resolveEditor();
+                    else rejectEditor(new Error(`${editorName} exited with status ${code ?? "unknown"}`));
+                });
             });
+        } catch (error: unknown) {
+            failure = error;
         } finally {
+            this.#terminalSuspended = false;
             this.#ui.start();
+            const status = this.#liveStatus;
+            if (
+                status?.phase === "pending" ||
+                status?.phase === "indexing" ||
+                status?.phase === "starting"
+            ) {
+                this.#ensureLiveProgress(status);
+            } else if (this.#live?.running) {
+                this.#stopProgress();
+                this.#ui.terminal.setProgress(false);
+            }
             this.#ui.requestRender(true);
         }
+        if (failure !== undefined) this.#appendError(failure);
     }
 
     async #showMcp(): Promise<void> {
@@ -1662,10 +2042,11 @@ export class ScriberyTuiApp {
             ...(this.#activeProject === undefined ? {} : { project: this.#activeProject }),
             ...(this.#activePreference === undefined ? {} : { preference: this.#activePreference }),
             indexing: this.#activeJob !== undefined,
+            ...(this.#liveStatus === undefined ? {} : { live: this.#liveStatus }),
         });
         this.#promptLabel.setState(this.#activeProject?.root, false);
         this.#footer.setLocation(this.#cwd, this.#activeProject?.root);
-        this.#ui.requestRender();
+        if (!this.#terminalSuspended) this.#ui.requestRender();
     }
 
     #append(message: string, tone: "normal" | "muted" | "success" | "warning" = "normal"): void {
@@ -1675,7 +2056,7 @@ export class ScriberyTuiApp {
                     : message;
         this.#transcript.addChild(new Text(styled, 0, 0));
         this.#transcript.addChild(new Spacer(1));
-        this.#ui.requestRender();
+        if (!this.#terminalSuspended) this.#ui.requestRender();
     }
 
     #appendError(error: unknown): void {
@@ -1806,7 +2187,7 @@ export class ScriberyTuiApp {
         value: unknown,
         label: string,
     ): Promise<unknown | undefined> {
-        if (this.#activeJob !== undefined) {
+        if (this.#activeJob !== undefined || this.#live?.running) {
             throw new Error(
                 "JSON configuration editing is unavailable while indexing is active",
             );
@@ -1954,6 +2335,11 @@ export class ScriberyTuiApp {
             this.#activeJob.controller.abort(new Error("Indexing cancelled while exiting the TUI"));
         }
         this.#stopping = true;
+        if (this.#live?.running) {
+            await this.#live.stop().catch(() => {});
+        }
+        await this.#livePublicationChain;
+        this.#live = undefined;
         this.#stopProgress();
         this.#ui.terminal.setProgress(false);
         this.#ui.stop();
