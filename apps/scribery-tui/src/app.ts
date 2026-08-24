@@ -55,6 +55,7 @@ import type { ProjectPreference } from "./domain/project-preferences.js";
 import { ProjectPreferenceStore } from "./services/preference-store.js";
 import { formatError } from "./services/error-formatter.js";
 import { shouldRenderIndexingProgressImmediately } from "./services/indexing-render-policy.js";
+import { editJsonConfiguration } from "./services/json-config-editor.js";
 import {
     SystemProfileCredentialStore,
     type ProfileCredentialStore,
@@ -579,6 +580,11 @@ export class ScriberyTuiApp {
                 : []),
             { value: "test", label: "Test connection" },
             { value: "edit", label: "Edit profile" },
+            {
+                value: "edit-json",
+                label: "Edit JSON",
+                description: "Open validated profile JSON in a terminal editor",
+            },
             { value: "rename", label: "Rename" },
             { value: "show", label: "Show configuration" },
             { value: "delete", label: "Delete profile" },
@@ -629,6 +635,8 @@ export class ScriberyTuiApp {
             await this.#diagnoseProfile(profile.name);
         } else if (action.value === "edit") {
             await this.#editProfile(profile);
+        } else if (action.value === "edit-json") {
+            await this.#editProfileJson(profile);
         } else if (action.value === "rename") {
             await this.#renameProfile(profile);
         } else if (action.value === "show") {
@@ -735,6 +743,23 @@ export class ScriberyTuiApp {
         if (configuration === undefined) return;
         await this.#profiles.set(configuration);
         this.#append(`Updated profile ${profile.name}.`, "success");
+    }
+
+    async #editProfileJson(profile: ProviderProfile): Promise<void> {
+        const edited = await this.#editConfigurationJson(
+            editableProfile(profile),
+            `profile-${profile.name}`,
+        );
+        if (edited === undefined) {
+            this.#append(`Profile ${profile.name} was not changed.`, "muted");
+            return;
+        }
+        const input = requireEditedProfile(
+            edited,
+            profile.name,
+        );
+        await this.#profiles.set(input);
+        this.#append(`Updated profile ${profile.name} from JSON.`, "success");
     }
 
     async #promptProfileConfiguration(
@@ -1039,6 +1064,11 @@ export class ScriberyTuiApp {
         const action = await this.#pick(preset.name, [
             { value: "use", label: "Use for current project" },
             { value: "edit", label: "Edit preset" },
+            {
+                value: "edit-json",
+                label: "Edit JSON",
+                description: "Open validated preset JSON in a terminal editor",
+            },
             { value: "rename", label: "Rename" },
             { value: "show", label: "Show configuration" },
             { value: "delete", label: "Delete preset" },
@@ -1054,6 +1084,8 @@ export class ScriberyTuiApp {
             this.#updateHeader();
         } else if (action.value === "edit") {
             await this.#editPreset(preset);
+        } else if (action.value === "edit-json") {
+            await this.#editPresetJson(preset);
         } else if (action.value === "rename") {
             await this.#renamePreset(preset);
         } else if (action.value === "show") {
@@ -1092,6 +1124,23 @@ export class ScriberyTuiApp {
         if (configuration === undefined) return;
         await this.#presets.set(configuration);
         this.#append(`Updated preset ${preset.name}.`, "success");
+    }
+
+    async #editPresetJson(preset: IndexingPreset): Promise<void> {
+        const edited = await this.#editConfigurationJson(
+            editablePreset(preset),
+            `preset-${preset.name}`,
+        );
+        if (edited === undefined) {
+            this.#append(`Preset ${preset.name} was not changed.`, "muted");
+            return;
+        }
+        const input = requireEditedPreset(
+            edited,
+            preset.name,
+        );
+        await this.#presets.set(input);
+        this.#append(`Updated preset ${preset.name} from JSON.`, "success");
     }
 
     async #promptPresetConfiguration(
@@ -1753,6 +1802,26 @@ export class ScriberyTuiApp {
         this.#append(JSON.stringify(await profileService.diagnose(profileName), null, 2), "success");
     }
 
+    async #editConfigurationJson(
+        value: unknown,
+        label: string,
+    ): Promise<unknown | undefined> {
+        if (this.#activeJob !== undefined) {
+            throw new Error(
+                "JSON configuration editing is unavailable while indexing is active",
+            );
+        }
+        return editJsonConfiguration(value, label, {
+            beforeSpawn: () => this.#ui.stop(),
+            afterSpawn: () => {
+                this.#ui.start();
+                this.#ui.terminal.setTitle("Scribery");
+                this.#ui.setFocus(this.#editor);
+                this.#ui.requestRender(true);
+            },
+        });
+    }
+
     async #confirm(title: string, defaultYes = true): Promise<boolean> {
         const selected = await this.#pick(title, defaultYes ? [
             { value: "yes", label: "Yes" },
@@ -1936,6 +2005,110 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 
 function splitPatterns(value: string): readonly string[] {
     return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function editableProfile(profile: ProviderProfile): ProviderProfileInput {
+    return {
+        name: profile.name,
+        embedding: { ...profile.embedding },
+        ...(profile.reranking === undefined
+            ? {}
+            : { reranking: { ...profile.reranking } }),
+    };
+}
+
+function editablePreset(preset: IndexingPreset): IndexingPresetInput {
+    return {
+        name: preset.name,
+        providerProfile: preset.providerProfile,
+        ...(preset.maximumChunkSize === undefined
+            ? {}
+            : { maximumChunkSize: preset.maximumChunkSize }),
+        ...(preset.windows1251 === undefined
+            ? {}
+            : { windows1251: preset.windows1251 }),
+        ...(preset.include === undefined
+            ? {}
+            : { include: [...preset.include] }),
+        ...(preset.exclude === undefined
+            ? {}
+            : { exclude: [...preset.exclude] }),
+    };
+}
+
+function requireEditedProfile(
+    value: unknown,
+    expectedName: string,
+): ProviderProfileInput {
+    if (!isRecord(value) || value.name !== expectedName) {
+        throw new Error(
+            `Edited profile name must remain ${expectedName}; use Rename to update references safely`,
+        );
+    }
+    rejectUnknownKeys(
+        value,
+        ["name", "embedding", "reranking"],
+        "profile",
+    );
+    if (isRecord(value.embedding)) {
+        rejectUnknownKeys(
+            value.embedding,
+            [
+                "provider",
+                "model",
+                "dimensions",
+                "baseUrl",
+                "maximumInputs",
+                "embeddingSuffix",
+            ],
+            "profile embedding",
+        );
+    }
+    if (isRecord(value.reranking)) {
+        rejectUnknownKeys(
+            value.reranking,
+            ["provider", "model", "baseUrl", "instruction"],
+            "profile reranking",
+        );
+    }
+    return value as unknown as ProviderProfileInput;
+}
+
+function requireEditedPreset(
+    value: unknown,
+    expectedName: string,
+): IndexingPresetInput {
+    if (!isRecord(value) || value.name !== expectedName) {
+        throw new Error(
+            `Edited preset name must remain ${expectedName}; use Rename to update references safely`,
+        );
+    }
+    rejectUnknownKeys(
+        value,
+        [
+            "name",
+            "providerProfile",
+            "maximumChunkSize",
+            "windows1251",
+            "include",
+            "exclude",
+        ],
+        "preset",
+    );
+    return value as unknown as IndexingPresetInput;
+}
+
+function rejectUnknownKeys(
+    value: Readonly<Record<string, unknown>>,
+    allowed: readonly string[],
+    label: string,
+): void {
+    const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+    if (unknown.length > 0) {
+        throw new Error(
+            `Edited ${label} contains unknown field${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}`,
+        );
+    }
 }
 
 function parsePositiveInteger(value: string, label: string): number {
