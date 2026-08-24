@@ -33,10 +33,13 @@ import {
     type IndexedProjectSummary,
     type IndexingProgress,
     type IndexingPreset,
+    type IndexingPresetInput,
     type CollectionService as CollectionServiceType,
     type CollectionSummary,
+    type OpenAiCompatibleModelSummary,
     type ProjectIndexingEvent,
     type ProviderProfile,
+    type ProviderProfileInput,
     type RetrievalResult,
 } from "scribery";
 
@@ -666,12 +669,6 @@ export class ScriberyTuiApp {
     async #createProfile(): Promise<void> {
         const name = (await this.#input("Create provider profile", "Name"))?.trim();
         if (!name) return;
-        const baseUrl = (await this.#input(
-            "Create provider profile",
-            "OpenAI-compatible base URL",
-            "http://127.0.0.1:1234/v1",
-        ))?.trim();
-        if (!baseUrl) return;
         const apiKey = await this.#secretInput("Create provider profile", "API key (optional)");
         if (apiKey === undefined) return;
         let apiKeyStorage: "saved" | "session" | undefined;
@@ -696,43 +693,13 @@ export class ScriberyTuiApp {
             }
         }
         const profileService = new ProviderProfileService(apiKeyOptions(apiKey || this.#environmentApiKey));
-        this.#append("Discovering provider models…", "muted");
-        const models = await profileService.listProviderModels(baseUrl);
-        if (models.length === 0) throw new Error("The provider did not return any models");
-        const selected = await this.#pick("Select embedding model", models.map((model) => ({
-            value: model.id,
-            label: model.id,
-            ...(model.ownedBy === undefined ? {} : { description: model.ownedBy }),
-        })));
-        if (!selected) return;
-        const inspection = await profileService.inspectEmbeddingModel(selected.value, baseUrl);
-        const rerankingModel = (await this.#input(
+        const configuration = await this.#promptProfileConfiguration(
             "Create provider profile",
-            "Reranker model (empty disables)",
-        ))?.trim();
-        if (rerankingModel === undefined) return;
-        const rerankingProvider = rerankingModel
-            ? await this.#pickRerankingInterface()
-            : undefined;
-        if (rerankingModel && rerankingProvider === undefined) return;
-        const saved = await this.#profiles.set({
             name,
-            embedding: {
-                provider: "openai-compatible",
-                model: selected.value,
-                dimensions: inspection.dimensions,
-                baseUrl,
-            },
-            ...(rerankingModel && rerankingProvider
-                ? {
-                    reranking: {
-                        provider: rerankingProvider,
-                        model: rerankingModel,
-                        baseUrl,
-                    },
-                }
-                : {}),
-        });
+            profileService,
+        );
+        if (configuration === undefined) return;
+        const saved = await this.#profiles.set(configuration);
         if (apiKey && apiKeyStorage === "saved") {
             try {
                 await this.#credentials.set(saved.name, apiKey);
@@ -748,76 +715,247 @@ export class ScriberyTuiApp {
         } else if (apiKey) {
             this.#sessionApiKeys.set(saved.name, apiKey);
         }
-        this.#append(`Created profile ${saved.name} with ${inspection.dimensions} dimensions.`, "success");
+        this.#append(
+            `Created profile ${saved.name} with ${saved.embedding.dimensions} dimensions.`,
+            "success",
+        );
         if (apiKey && apiKeyStorage === "session" && !await this.#credentialsAvailable()) {
             this.#append(`${this.#credentials.displayName} is unavailable; the API key will be forgotten when this TUI exits.`, "warning");
         }
     }
 
     async #editProfile(profile: ProviderProfile): Promise<void> {
-        const baseUrl = (await this.#input(
+        const profileService = await this.#profileService(profile.name);
+        const configuration = await this.#promptProfileConfiguration(
             `Edit ${profile.name}`,
-            "OpenAI-compatible base URL",
-            profile.embedding.baseUrl ?? "http://127.0.0.1:1234/v1",
-        ))?.trim();
-        if (baseUrl === undefined) return;
-        const model = (await this.#input(
-            `Edit ${profile.name}`,
-            "Embedding model",
-            profile.embedding.model,
-        ))?.trim();
-        if (!model) return;
-        const dimensionsText = await this.#input(
-            `Edit ${profile.name}`,
-            "Dimensions",
-            String(profile.embedding.dimensions),
+            profile.name,
+            profileService,
+            profile,
         );
-        if (dimensionsText === undefined) return;
-        const dimensions = Number.parseInt(dimensionsText, 10);
-        if (!Number.isSafeInteger(dimensions) || dimensions < 1) {
-            throw new Error("Embedding dimensions must be a positive integer");
+        if (configuration === undefined) return;
+        await this.#profiles.set(configuration);
+        this.#append(`Updated profile ${profile.name}.`, "success");
+    }
+
+    async #promptProfileConfiguration(
+        title: string,
+        name: string,
+        profileService: ProviderProfileService,
+        current?: ProviderProfile,
+    ): Promise<ProviderProfileInput | undefined> {
+        const baseUrlInput = await this.#input(
+            title,
+            "OpenAI-compatible base URL",
+            current?.embedding.baseUrl ?? "http://127.0.0.1:1234/v1",
+        );
+        if (baseUrlInput === undefined) return undefined;
+        const baseUrl = baseUrlInput.trim();
+        const models = await this.#discoverProviderModels(
+            profileService,
+            baseUrl || undefined,
+            current,
+        );
+        const embeddingModel = await this.#pickProviderModel(
+            "Select embedding model",
+            models,
+            current?.embedding.model,
+        );
+        if (typeof embeddingModel !== "string") return undefined;
+        const embeddingSuffix = await this.#input(
+            title,
+            "Embedding suffix (empty uses none)",
+            current?.embedding.embeddingSuffix ?? "",
+        );
+        if (embeddingSuffix === undefined) return undefined;
+        this.#append(`Inspecting embedding model ${embeddingModel}…`, "muted");
+        let detectedDimensions: number;
+        try {
+            detectedDimensions = (await profileService.inspectEmbeddingModel(
+                embeddingModel,
+                baseUrl || undefined,
+                embeddingSuffix || undefined,
+            )).dimensions;
+        } catch (error: unknown) {
+            const unchangedExistingEmbedding = current !== undefined &&
+                embeddingModel === current.embedding.model &&
+                baseUrl === (current.embedding.baseUrl ??
+                    "http://127.0.0.1:1234/v1") &&
+                embeddingSuffix === (current.embedding.embeddingSuffix ?? "");
+            if (!unchangedExistingEmbedding) throw error;
+            detectedDimensions = current.embedding.dimensions;
+            this.#append(
+                `Could not inspect the unchanged embedding model; retaining ${detectedDimensions} dimensions. ${formatError(error)}`,
+                "warning",
+            );
         }
-        const rerankingModel = (await this.#input(
-            `Edit ${profile.name}`,
-            "Reranker (empty disables)",
-            profile.reranking?.model ?? "",
-        ))?.trim();
-        if (rerankingModel === undefined) return;
-        const rerankingProvider = rerankingModel
-            ? await this.#pickRerankingInterface(profile.reranking?.provider)
-            : undefined;
-        if (rerankingModel && rerankingProvider === undefined) return;
-        await this.#profiles.set({
-            name: profile.name,
+        const dimensionsText = await this.#input(
+            title,
+            "Embedding dimensions",
+            String(detectedDimensions),
+        );
+        if (dimensionsText === undefined) return undefined;
+        const dimensions = parsePositiveInteger(
+            dimensionsText,
+            "Embedding dimensions",
+        );
+        const maximumInputsText = await this.#input(
+            title,
+            "Embedding batch size (empty uses default)",
+            current?.embedding.maximumInputs === undefined
+                ? ""
+                : String(current.embedding.maximumInputs),
+        );
+        if (maximumInputsText === undefined) return undefined;
+        const maximumInputs = parseOptionalPositiveInteger(
+            maximumInputsText,
+            "Embedding batch size",
+        );
+        const rerankingModel = await this.#pickProviderModel(
+            "Select reranker model",
+            models,
+            current?.reranking?.model,
+            true,
+        );
+        if (rerankingModel === undefined) return undefined;
+
+        let reranking: ProviderProfileInput["reranking"];
+        if (rerankingModel !== null) {
+            const provider = await this.#pickRerankingInterface(
+                current?.reranking?.provider,
+            );
+            if (provider === undefined) return undefined;
+            if (provider === "openai-compatible-rerank") {
+                reranking = {
+                    provider,
+                    model: rerankingModel,
+                    ...(baseUrl ? { baseUrl } : {}),
+                };
+            } else {
+                const currentInstruction = current?.reranking !== undefined &&
+                        current.reranking.provider !== "openai-compatible-rerank"
+                    ? current.reranking.instruction
+                    : undefined;
+                const instruction = await this.#input(
+                    title,
+                    "Reranker instruction (empty uses default)",
+                    currentInstruction ?? "",
+                );
+                if (instruction === undefined) return undefined;
+                reranking = {
+                    provider,
+                    model: rerankingModel,
+                    ...(baseUrl ? { baseUrl } : {}),
+                    ...(instruction.trim().length === 0
+                        ? {}
+                        : { instruction: instruction.trim() }),
+                };
+            }
+        }
+
+        return {
+            name,
             embedding: {
                 provider: "openai-compatible",
-                model,
+                model: embeddingModel,
                 dimensions,
                 ...(baseUrl ? { baseUrl } : {}),
-                ...(profile.embedding.maximumInputs === undefined
-                    ? {}
-                    : { maximumInputs: profile.embedding.maximumInputs }),
-                ...(profile.embedding.embeddingSuffix === undefined
-                    ? {}
-                    : { embeddingSuffix: profile.embedding.embeddingSuffix }),
+                ...(maximumInputs === undefined ? {} : { maximumInputs }),
+                ...(embeddingSuffix.length === 0 ? {} : { embeddingSuffix }),
             },
-            ...(rerankingModel && rerankingProvider
-                ? {
-                    reranking: {
-                        provider: rerankingProvider,
-                        model: rerankingModel,
-                        ...(baseUrl ? { baseUrl } : {}),
-                        ...(rerankingProvider !== "openai-compatible-qwen3" ||
-                                profile.reranking === undefined ||
-                                !("instruction" in profile.reranking) ||
-                                profile.reranking.instruction === undefined
-                            ? {}
-                            : { instruction: profile.reranking.instruction }),
-                    },
-                }
-                : {}),
+            ...(reranking === undefined ? {} : { reranking }),
+        };
+    }
+
+    async #discoverProviderModels(
+        profileService: ProviderProfileService,
+        baseUrl: string | undefined,
+        current?: ProviderProfile,
+    ): Promise<readonly OpenAiCompatibleModelSummary[]> {
+        this.#append("Discovering provider models…", "muted");
+        try {
+            const models = await profileService.listProviderModels(baseUrl);
+            if (models.length === 0) {
+                throw new Error("The provider did not return any models");
+            }
+            return models;
+        } catch (error: unknown) {
+            if (current === undefined) throw error;
+            this.#append(
+                `Could not refresh provider models; current model IDs and manual entry remain available. ${formatError(error)}`,
+                "warning",
+            );
+            return [
+                { id: current.embedding.model },
+                ...(current.reranking === undefined
+                    ? []
+                    : [{ id: current.reranking.model }]),
+            ];
+        }
+    }
+
+    async #pickProviderModel(
+        title: string,
+        models: readonly OpenAiCompatibleModelSummary[],
+        currentModel?: string,
+        allowDisabled = false,
+    ): Promise<string | null | undefined> {
+        const unique = [...new Map(models.map((model) => [model.id, model])).values()];
+        if (
+            currentModel !== undefined &&
+            !unique.some(({ id }) => id === currentModel)
+        ) {
+            unique.push({ id: currentModel });
+        }
+        unique.sort((left, right) => {
+            if (left.id === currentModel) return -1;
+            if (right.id === currentModel) return 1;
+            return left.id.localeCompare(right.id);
         });
-        this.#append(`Updated profile ${profile.name}.`, "success");
+        const items: SelectItem[] = [];
+        if (allowDisabled && currentModel === undefined) {
+            items.push({
+                value: "__disabled",
+                label: "Disable reranking",
+                description: "Current",
+            });
+        }
+        unique.forEach((model, index) => {
+            const description = [
+                model.id === currentModel ? "Current" : undefined,
+                model.ownedBy,
+            ].filter(Boolean).join(" · ");
+            items.push({
+                value: `model:${index}`,
+                label: model.id,
+                ...(description.length === 0 ? {} : { description }),
+            });
+        });
+        if (allowDisabled && currentModel !== undefined) {
+            items.push({
+                value: "__disabled",
+                label: "Disable reranking",
+            });
+        }
+        items.push({
+            value: "__manual",
+            label: "Enter model ID manually",
+            description: "Use an ID absent from provider discovery",
+        });
+        const selection = await this.#pick(title, items);
+        if (selection === undefined) return undefined;
+        if (selection.value === "__disabled") return null;
+        if (selection.value === "__manual") {
+            const manual = (await this.#input(
+                title,
+                "Model ID",
+                currentModel ?? "",
+            ))?.trim();
+            if (manual === undefined) return undefined;
+            if (manual.length === 0) throw new Error("Model ID must not be empty");
+            return manual;
+        }
+        const index = Number.parseInt(selection.value.slice("model:".length), 10);
+        return unique[index]?.id;
     }
 
     async #renameProfile(profile: ProviderProfile): Promise<void> {
@@ -936,61 +1074,77 @@ export class ScriberyTuiApp {
     async #createPreset(): Promise<void> {
         const name = (await this.#input("Create indexing preset", "Name"))?.trim();
         if (!name) return;
-        const profiles = await this.#profiles.list();
-        if (profiles.length === 0) throw new Error("Create a provider profile before creating a preset");
-        const compatibilityProfile = this.#activePreference?.profile ?? profiles[0]!.name;
-        const chunkText = await this.#input("Maximum chunk size", "Characters", "3000");
-        if (chunkText === undefined) return;
-        const maximumChunkSize = Number.parseInt(chunkText, 10);
-        if (!Number.isSafeInteger(maximumChunkSize) || maximumChunkSize < 1) {
-            throw new Error("Maximum chunk size must be a positive integer");
-        }
-        const windows1251 = await this.#confirm("Enable Windows-1251 fallback?", false);
-        const saved = await this.#presets.set({
+        const configuration = await this.#promptPresetConfiguration(
+            "Create indexing preset",
             name,
-            providerProfile: compatibilityProfile,
-            maximumChunkSize,
-            windows1251,
-        });
+        );
+        if (configuration === undefined) return;
+        const saved = await this.#presets.set(configuration);
         this.#append(`Created preset ${saved.name}.`, "success");
     }
 
     async #editPreset(preset: IndexingPreset): Promise<void> {
-        const chunkText = await this.#input(
+        const configuration = await this.#promptPresetConfiguration(
             `Edit ${preset.name}`,
-            "Maximum chunk size",
-            String(preset.maximumChunkSize ?? 3_000),
+            preset.name,
+            preset,
         );
-        if (chunkText === undefined) return;
-        const maximumChunkSize = Number.parseInt(chunkText, 10);
-        if (!Number.isSafeInteger(maximumChunkSize) || maximumChunkSize < 1) {
-            throw new Error("Maximum chunk size must be a positive integer");
+        if (configuration === undefined) return;
+        await this.#presets.set(configuration);
+        this.#append(`Updated preset ${preset.name}.`, "success");
+    }
+
+    async #promptPresetConfiguration(
+        title: string,
+        name: string,
+        current?: IndexingPreset,
+    ): Promise<IndexingPresetInput | undefined> {
+        const profiles = await this.#profiles.list();
+        if (profiles.length === 0) {
+            throw new Error("Create a provider profile before creating a preset");
         }
+        const providerProfile = await this.#pickProfile(
+            profiles,
+            "Select provider profile",
+            current?.providerProfile ?? this.#activePreference?.profile,
+        );
+        if (providerProfile === undefined) return undefined;
+        const chunkText = await this.#input(
+            title,
+            "Maximum chunk size",
+            String(current?.maximumChunkSize ?? 3_000),
+        );
+        if (chunkText === undefined) return undefined;
+        const maximumChunkSize = parsePositiveInteger(
+            chunkText,
+            "Maximum chunk size",
+        );
         const includeText = await this.#input(
-            `Edit ${preset.name}`,
+            title,
             "Include globs (comma separated)",
-            preset.include?.join(", ") ?? "",
+            current?.include?.join(", ") ?? "",
         );
-        if (includeText === undefined) return;
+        if (includeText === undefined) return undefined;
         const excludeText = await this.#input(
-            `Edit ${preset.name}`,
+            title,
             "Exclude globs (comma separated)",
-            preset.exclude?.join(", ") ?? "",
+            current?.exclude?.join(", ") ?? "",
         );
-        if (excludeText === undefined) return;
+        if (excludeText === undefined) return undefined;
         const windows1251 = await this.#confirm(
             "Enable Windows-1251 fallback?",
-            preset.windows1251 === true,
+            current?.windows1251 === true,
         );
-        await this.#presets.set({
-            name: preset.name,
-            providerProfile: preset.providerProfile,
+        const include = splitPatterns(includeText);
+        const exclude = splitPatterns(excludeText);
+        return {
+            name,
+            providerProfile,
             maximumChunkSize,
             windows1251,
-            ...(splitPatterns(includeText).length === 0 ? {} : { include: splitPatterns(includeText) }),
-            ...(splitPatterns(excludeText).length === 0 ? {} : { exclude: splitPatterns(excludeText) }),
-        });
-        this.#append(`Updated preset ${preset.name}.`, "success");
+            ...(include.length === 0 ? {} : { include }),
+            ...(exclude.length === 0 ? {} : { exclude }),
+        };
     }
 
     async #renamePreset(preset: IndexingPreset): Promise<void> {
@@ -1610,11 +1764,20 @@ export class ScriberyTuiApp {
         return selected?.value === "yes";
     }
 
-    async #pickProfile(profiles: readonly ProviderProfile[], title: string): Promise<string | undefined> {
-        const selection = await this.#pick(title, profiles.map((profile) => ({
+    async #pickProfile(
+        profiles: readonly ProviderProfile[],
+        title: string,
+        currentName?: string,
+    ): Promise<string | undefined> {
+        const ordered = [...profiles].sort((left, right) => {
+            if (left.name === currentName) return -1;
+            if (right.name === currentName) return 1;
+            return left.name.localeCompare(right.name);
+        });
+        const selection = await this.#pick(title, ordered.map((profile) => ({
             value: profile.name,
             label: profile.name,
-            description: `${profile.embedding.model} · ${profile.embedding.dimensions} dimensions · ${this.#rerankingSummary(profile)}`,
+            description: `${profile.name === currentName ? "Current · " : ""}${profile.embedding.model} · ${profile.embedding.dimensions} dimensions · ${this.#rerankingSummary(profile)}`,
         })));
         return selection?.value;
     }
@@ -1773,6 +1936,27 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 
 function splitPatterns(value: string): readonly string[] {
     return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function parsePositiveInteger(value: string, label: string): number {
+    const normalized = value.trim();
+    if (!/^\d+$/u.test(normalized)) {
+        throw new Error(`${label} must be a positive integer`);
+    }
+    const parsed = Number(normalized);
+    if (!Number.isSafeInteger(parsed) || parsed < 1) {
+        throw new Error(`${label} must be a positive integer`);
+    }
+    return parsed;
+}
+
+function parseOptionalPositiveInteger(
+    value: string,
+    label: string,
+): number | undefined {
+    return value.trim().length === 0
+        ? undefined
+        : parsePositiveInteger(value, label);
 }
 
 function mediaTypeFor(path: string): string {
