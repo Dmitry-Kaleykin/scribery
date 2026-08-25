@@ -40,6 +40,10 @@ import { ProjectController } from "./features/project-controller.js";
 import { ProjectIndexingController } from "./features/project-indexing-controller.js";
 import { PresetController } from "./features/preset-controller.js";
 import { ManualOperationManager } from "./operations/manual-operation-manager.js";
+import {
+    ActiveIndexResolver,
+    type ActiveIndexSummary,
+} from "./services/active-index-resolver.js";
 import { ProjectPreferenceStore } from "./services/preference-store.js";
 import { formatError } from "./services/error-formatter.js";
 import { editJsonConfiguration } from "./services/json-config-editor.js";
@@ -70,6 +74,7 @@ export class ScriberyTuiApp {
     readonly #indexing: ProjectIndexingService;
     readonly #inspection = new ProjectInspectionService();
     readonly #targets = new ProjectRetrievalTargetService();
+    readonly #activeIndexes = new ActiveIndexResolver(this.#targets);
     readonly #ui = new TuiMainScreen(new ProcessTerminal());
     readonly #header = new HeaderComponent();
     readonly #transcript = new Container();
@@ -100,6 +105,7 @@ export class ScriberyTuiApp {
     #projects: readonly IndexedProjectSummary[] = [];
     #activeProject: IndexedProjectSummary | undefined;
     #activePreference: ProjectPreference | undefined;
+    #activeIndex: ActiveIndexSummary | undefined;
     #lastInterrupt = 0;
     #stopping = false;
     #cancelPromptActive = false;
@@ -598,6 +604,9 @@ export class ScriberyTuiApp {
         this.#activePreference = this.#activeProject
             ? await this.#preferences.get(this.#activeProject.projectIdentifier)
             : undefined;
+        this.#activeIndex = this.#activeProject
+            ? await this.#activeIndexes.resolve(this.#activeProject)
+            : undefined;
         this.#updateHeader();
     }
 
@@ -605,6 +614,7 @@ export class ScriberyTuiApp {
         this.#header.setState({
             ...(this.#activeProject === undefined ? {} : { project: this.#activeProject }),
             ...(this.#activePreference === undefined ? {} : { preference: this.#activePreference }),
+            ...(this.#activeIndex === undefined ? {} : { activeIndex: this.#activeIndex }),
             indexing: this.#operations.running,
             ...(this.#liveIndexing.status === undefined ? {} : { live: this.#liveIndexing.status }),
         });

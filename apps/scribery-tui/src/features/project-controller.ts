@@ -159,15 +159,18 @@ export class ProjectController {
         if (!action) return;
         if (action.value === "switch") {
             await this.#targets.switchTarget(project.projectIdentifier, selection.value, this.#cwd);
+            await this.#refreshProjects(project.projectIdentifier);
             this.#ui.append(`Activated target ${selection.value}.`, "success");
         } else if (action.value === "rename") {
             const next = (await this.#ui.input(`Rename ${selection.value}`, "New name", selection.value))?.trim();
             if (next && next !== selection.value) {
                 await this.#targets.renameTarget(project.projectIdentifier, selection.value, next, this.#cwd);
+                await this.#refreshProjects(project.projectIdentifier);
                 this.#ui.append(`Renamed ${selection.value} to ${next}.`, "success");
             }
         } else if (action.value === "remove" && await this.#ui.confirm(`Remove target ${selection.value}?`)) {
             await this.#targets.removeTarget(project.projectIdentifier, selection.value, this.#cwd);
+            await this.#refreshProjects(project.projectIdentifier);
             this.#ui.append(`Removed target ${selection.value}.`, "success");
         }
     }
