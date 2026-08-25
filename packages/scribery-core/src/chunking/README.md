@@ -86,11 +86,22 @@ that neither neighbor can absorb remains in chunking output with
 
 After boundary compaction, cAST performs a conservative dangling-prefix pass.
 A fragment is merged forward only when it is at most 20% of the configured
-maximum size (capped at 200 UTF-16 code units), ends in a continuation marker
-such as `,`, `=>`, `=`, `{`, `(`, `[`, or `:`, and the combined fragment remains
-within the maximum. Complete short constructs and large prefixes are left
-unchanged. This keeps call headers, function headers, and similar continuations
-with useful body content without applying a blanket minimum chunk size.
+maximum size, identifies a continuation, and the combined fragment remains
+within the maximum. Declaration and control headers immediately followed by an
+opening AST block may occupy up to half the chunk; both limits are capped at 512
+UTF-16 code units. Continuations also include marker tokens such as `,`, `=>`,
+`=`, `{`, `(`, `[`, and `:`, plus control-flow keywords such as `else`. Complete
+short constructs and large prefixes are left unchanged. This keeps class,
+method, call, and control-flow headers with useful body content without applying
+a blanket minimum chunk size.
+
+A final bounded compaction pass folds fragments no larger than 20% of the
+configured maximum (capped at 512 UTF-16 code units) into an adjacent semantic
+fragment when their combined range still fits. Continuations such as `catch`,
+`else`, `finally`, and closing delimiters prefer the preceding fragment; other
+small fragments prefer the larger compatible neighbor. This removes isolated
+setup statements and structural tails while preserving source order, exact
+coverage, and the hard size limit.
 
 When such a prefix precedes an oversized AST child, cAST carries the prefix into
 that child's recursive split envelope instead of emitting it first. Greedy

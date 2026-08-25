@@ -24,6 +24,7 @@ import {
     compactDanglingPrefixes,
     isDanglingPrefix,
 } from "./cast/utils/dangling-prefixes.js";
+import { compactSmallFragments } from "./cast/utils/small-fragments.js";
 
 interface EmitFragmentTask {
     operation: "emit";
@@ -155,8 +156,16 @@ function splitAndMerge(
         signal,
     );
 
-    return compactDanglingPrefixes(
+    const prefixCompacted = compactDanglingPrefixes(
         boundaryCompacted,
+        content,
+        maximumSize,
+        path,
+        signal,
+    );
+
+    return compactSmallFragments(
+        prefixCompacted,
         content,
         maximumSize,
         path,
@@ -183,11 +192,14 @@ function createChildTasks(
             continue;
         }
 
+        const previousChild = parent.node.children[index - 1];
         const nextChild = parent.node.children[index + 1];
         const startOffset = index === 0
             ? parent.startOffset
-            : child.range.startOffset;
-        const endOffset = nextChild?.range.startOffset ?? parent.endOffset;
+            : boundaryBeforeChild(previousChild, child, content);
+        const endOffset = nextChild === undefined
+            ? parent.endOffset
+            : boundaryBeforeChild(child, nextChild, content);
         const size = endOffset - startOffset;
 
         if (size > maximumSize) {
@@ -196,7 +208,16 @@ function createChildTasks(
             if (
                 danglingPrefix !== undefined &&
                 danglingPrefix.endOffset === startOffset &&
-                isDanglingPrefix(danglingPrefix, content, maximumSize)
+                isDanglingPrefix(
+                    danglingPrefix,
+                    content,
+                    maximumSize,
+                    {
+                        startOffset,
+                        endOffset,
+                        kind: child.type,
+                    },
+                )
             ) {
                 siblingGroup = undefined;
                 tasks.push({
@@ -250,6 +271,29 @@ function createChildTasks(
 
     appendSiblingGroup(tasks, siblingGroup);
     return tasks;
+}
+
+function boundaryBeforeChild(
+    previousChild: SyntaxNode | undefined,
+    child: SyntaxNode,
+    content: string,
+): number {
+    if (previousChild === undefined) {
+        return child.range.startOffset;
+    }
+
+    const gapStartOffset = previousChild.range.endOffset;
+    const gapEndOffset = child.range.startOffset;
+
+    if (gapStartOffset >= gapEndOffset) {
+        return gapEndOffset;
+    }
+
+    const gap = content.slice(gapStartOffset, gapEndOffset);
+
+    return /^\s*(?:else|finally|while\s*\()\s*$/u.test(gap)
+        ? gapStartOffset
+        : gapEndOffset;
 }
 
 function appendSiblingGroup(

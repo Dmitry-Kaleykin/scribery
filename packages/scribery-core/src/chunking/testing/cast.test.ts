@@ -208,7 +208,7 @@ describe("CastChunkingStrategy", () => {
 
         assert.deepEqual(
             chunks.map(({ content }) => content),
-            ["call(AAAAABBBBBCCCCCDDDDD", "EEEEEFFFFF", ")"],
+            ["call(AAAAABBBBBCCCCCDDDDD", "EEEEEFFFFF)"],
         );
         assert.ok(chunks.every(({ content }) => content.length <= 25));
         assertExactCoverage(sourceDocument, chunks);

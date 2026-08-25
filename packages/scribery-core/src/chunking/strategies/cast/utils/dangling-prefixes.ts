@@ -1,8 +1,10 @@
 import { throwIfChunkingAborted } from "../../../utils/throw-if-aborted.js";
 import {
     DANGLING_PREFIX_ENDINGS,
+    DANGLING_PREFIX_KEYWORDS,
     DANGLING_PREFIX_MAXIMUM_SIZE,
     DANGLING_PREFIX_MAXIMUM_SIZE_RATIO,
+    STRUCTURAL_PREFIX_MAXIMUM_SIZE_RATIO,
 } from "../constants/compaction.js";
 import type { SourceFragment } from "../contracts/fragment.js";
 
@@ -23,7 +25,12 @@ export function compactDanglingPrefixes(
         if (
             prefix === undefined ||
             continuation === undefined ||
-            !isDanglingPrefix(prefix, content, maximumSize) ||
+            !isDanglingPrefix(
+                prefix,
+                content,
+                maximumSize,
+                continuation,
+            ) ||
             !canMerge(prefix, continuation, maximumSize)
         ) {
             continue;
@@ -42,16 +49,14 @@ export function isDanglingPrefix(
     fragment: SourceFragment,
     content: string,
     maximumSize: number,
+    continuation?: SourceFragment,
 ): boolean {
-    const maximumPrefixSize = Math.min(
+    const ordinaryMaximumPrefixSize = Math.min(
         DANGLING_PREFIX_MAXIMUM_SIZE,
         Math.floor(maximumSize * DANGLING_PREFIX_MAXIMUM_SIZE_RATIO),
     );
 
-    if (
-        fragment.boundaryAffinity !== undefined ||
-        fragment.endOffset - fragment.startOffset > maximumPrefixSize
-    ) {
+    if (fragment.boundaryAffinity !== undefined) {
         return false;
     }
 
@@ -60,8 +65,80 @@ export function isDanglingPrefix(
         fragment.endOffset,
     ).trimEnd();
 
-    return trimmed.length > 0 &&
-        DANGLING_PREFIX_ENDINGS.some((ending) => trimmed.endsWith(ending));
+    if (trimmed.length === 0) {
+        return false;
+    }
+
+    const opensStructuralBody = continuation !== undefined &&
+        startsWithOpeningBrace(continuation, content) &&
+        looksLikeBlockHeader(trimmed) &&
+        !trimmed.endsWith(";") &&
+        !trimmed.endsWith("}");
+    const maximumPrefixSize = opensStructuralBody
+        ? Math.min(
+            DANGLING_PREFIX_MAXIMUM_SIZE,
+            Math.floor(maximumSize * STRUCTURAL_PREFIX_MAXIMUM_SIZE_RATIO),
+        )
+        : ordinaryMaximumPrefixSize;
+
+    if (fragment.endOffset - fragment.startOffset > maximumPrefixSize) {
+        return false;
+    }
+
+    if (DANGLING_PREFIX_ENDINGS.some((ending) => trimmed.endsWith(ending))) {
+        return true;
+    }
+
+    if (DANGLING_PREFIX_KEYWORDS.some((keyword) => endsWithKeyword(
+        trimmed,
+        keyword,
+    ))) {
+        return true;
+    }
+
+    return opensStructuralBody;
+}
+
+function looksLikeBlockHeader(content: string): boolean {
+    if (content.endsWith(")")) {
+        return true;
+    }
+
+    if (DANGLING_PREFIX_KEYWORDS.some((keyword) => endsWithKeyword(
+        content,
+        keyword,
+    ))) {
+        return true;
+    }
+
+    return /(?:^|[\s;{}])(?:class|enum|interface|module|namespace)\s+[^;{}]+$/u
+        .test(content) ||
+        /\)\s*:\s*[^;{}=]+$/u.test(content);
+}
+
+function endsWithKeyword(content: string, keyword: string): boolean {
+    const startOffset = content.length - keyword.length;
+
+    if (
+        startOffset < 0 ||
+        content.slice(startOffset) !== keyword
+    ) {
+        return false;
+    }
+
+    const precedingCharacter = content[startOffset - 1];
+
+    return precedingCharacter === undefined ||
+        !/[\p{ID_Continue}$]/u.test(precedingCharacter);
+}
+
+function startsWithOpeningBrace(
+    fragment: SourceFragment,
+    content: string,
+): boolean {
+    return content.slice(fragment.startOffset, fragment.endOffset)
+        .trimStart()
+        .startsWith("{");
 }
 
 function canMerge(

@@ -41,6 +41,79 @@ describe("compactDanglingPrefixes", () => {
         );
     });
 
+    it("merges a block header with its opening body", () => {
+        const prefixes = [
+            "constructor(initialResolution = null)\n",
+            "if (users)\n",
+            "for (const user of users)\n",
+            "catch (error)\n",
+            "export class Resolution\n",
+        ];
+
+        for (const prefix of prefixes) {
+            const continuation = "{\n    useValue();\n}";
+            const content = `${prefix}${continuation}`;
+            const fragments = compactDanglingPrefixes(
+                [
+                    fragment(0, prefix.length),
+                    fragment(prefix.length, content.length),
+                ],
+                content,
+                100,
+                "src/example.ts",
+            );
+
+            assert.deepEqual(
+                fragments,
+                [fragment(0, content.length)],
+                prefix,
+            );
+        }
+    });
+
+    it("merges a continuation keyword forward", () => {
+        for (const prefix of ["else", "try", "finally", "do"]) {
+            const continuation = " next";
+            const content = `${prefix}${continuation}`;
+
+            assert.deepEqual(
+                compactDanglingPrefixes(
+                    [
+                        fragment(0, prefix.length),
+                        fragment(prefix.length, content.length),
+                    ],
+                    content,
+                    100,
+                    "src/example.ts",
+                ),
+                [fragment(0, content.length)],
+                prefix,
+            );
+        }
+    });
+
+    it("does not mistake complete statements or keyword suffixes for headers", () => {
+        for (const prefix of ["invoke();\n", "const style = 'freestyle'"]) {
+            const continuation = "{\n    unrelated();\n}";
+            const content = `${prefix}${continuation}`;
+            const fragments = [
+                fragment(0, prefix.length),
+                fragment(prefix.length, content.length),
+            ];
+
+            assert.deepEqual(
+                compactDanglingPrefixes(
+                    fragments,
+                    content,
+                    100,
+                    "src/example.ts",
+                ),
+                fragments,
+                prefix,
+            );
+        }
+    });
+
     it("does not merge a large prefix or exceed the maximum size", () => {
         const largePrefix = `${"argument".repeat(4)},`;
         const largePrefixContent = `${largePrefix}continuation`;

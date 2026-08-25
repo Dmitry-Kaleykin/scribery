@@ -213,6 +213,89 @@ describe("TypeScriptParser", () => {
         );
     });
 
+    it("keeps JavaScript block headers with the first part of oversized bodies", async () => {
+        const maximumSize = 240;
+        const repeatedAssignments = Array.from(
+            { length: 24 },
+            (_, index) => `                result.value${index} = ${index};`,
+        );
+        const sourceDocument = document({
+            path: "src/resolution.js",
+            language: "javascript",
+            format: "javascript",
+            content: [
+                "export default class Resolution {",
+                "    constructor(initialResolution = null)",
+                "    {",
+                ...Array.from(
+                    { length: 16 },
+                    (_, index) => `        this.value${index} = ${index};`,
+                ),
+                "    }",
+                "",
+                "    init(data)",
+                "    {",
+                "        try {",
+                "            for (const key in data)",
+                "            {",
+                "                if (data[key])",
+                "                {",
+                ...repeatedAssignments,
+                "                }",
+                "                else",
+                "                {",
+                "                    result.empty = true;",
+                "                }",
+                "            }",
+                "        }",
+                "        catch (error)",
+                "        {",
+                "            report(error);",
+                "        }",
+                "    }",
+                "}",
+                "",
+            ].join("\n"),
+        });
+        const chunks = await new CastChunkingStrategy(
+            createInitialParserRegistry(),
+        ).chunk(sourceDocument, {
+            maximumSize,
+            sizeUnit: "utf16-code-units",
+        });
+        const headers = [
+            "constructor(initialResolution = null)",
+            "init(data)",
+            "for (const key in data)",
+            "if (data[key])",
+            "else",
+            "catch (error)",
+        ];
+
+        for (const header of headers) {
+            const containingChunk = chunks.find(({ content }) =>
+                content.includes(header)
+            );
+
+            assert.ok(containingChunk, header);
+            assert.match(
+                containingChunk.content.slice(
+                    containingChunk.content.indexOf(header) + header.length,
+                ),
+                /\s*\{\s*\S/u,
+                header,
+            );
+        }
+
+        assert.ok(chunks.every(({ content }) =>
+            content.length <= maximumSize
+        ));
+        assert.equal(
+            chunks.map(({ content }) => content).join(""),
+            sourceDocument.content,
+        );
+    });
+
     it("uses TSX and JSX script kinds for their exact formats", async () => {
         const registry = createInitialParserRegistry();
         const typescriptTree = await registry.parse(
