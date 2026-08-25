@@ -18,6 +18,10 @@ import type { ManualOperationManager } from "../operations/manual-operation-mana
 import type { ProjectPreferenceStore } from "../services/preference-store.js";
 import { apiKeyOptions, type ProviderAccess } from "../services/provider-access.js";
 import { shouldRenderIndexingProgressImmediately } from "../services/indexing-render-policy.js";
+import {
+    shouldAnnounceLiveReady,
+    type LiveReadyIdentity,
+} from "../services/live-notification-policy.js";
 import type { ProgressPresenter } from "../ui/progress-presenter.js";
 import type { TranscriptTone } from "./contracts.js";
 import type { ProfileController } from "./profile-controller.js";
@@ -76,6 +80,7 @@ export class LiveIndexingController {
     #liveConfiguration: ProposedLiveConfiguration | undefined;
     #indexingProgress: IndexingProgress | undefined;
     #lastReadyPublication: string | undefined;
+    #lastReadyIdentity: LiveReadyIdentity | undefined;
     #lastFailure: string | undefined;
     #publicationChain: Promise<void> = Promise.resolve();
 
@@ -251,6 +256,7 @@ export class LiveIndexingController {
         this.#status = undefined;
         this.#indexingProgress = undefined;
         this.#lastReadyPublication = undefined;
+        this.#lastReadyIdentity = undefined;
         this.#lastFailure = undefined;
         this.#ui.append(
             `Starting live indexing for ${basename(configuration.root)}. The current Git branch will publish to live/<branch>.`,
@@ -358,6 +364,16 @@ export class LiveIndexingController {
             status.target === undefined ||
             publication === this.#lastReadyPublication
         ) return;
+        const readyIdentity: LiveReadyIdentity = {
+            branch: status.branch,
+            target: status.target,
+        };
+        const recoveredFromFailure = this.#lastFailure !== undefined;
+        const announce = shouldAnnounceLiveReady(
+            this.#lastReadyIdentity,
+            readyIdentity,
+            recoveredFromFailure,
+        );
         this.#lastFailure = undefined;
         await this.#preferences.set({
             projectIdentifier: configuration.projectIdentifier,
@@ -369,11 +385,14 @@ export class LiveIndexingController {
             allowDirty: true,
         });
         this.#lastReadyPublication = publication;
+        this.#lastReadyIdentity = readyIdentity;
         await this.#refreshProjects(configuration.projectIdentifier);
-        this.#ui.append(
-            `✓ Live index ready for ${status.branch ?? "the worktree"} · ${status.target} · build ${status.indexBuildId.slice(0, 12)}…`,
-            "success",
-        );
+        if (announce) {
+            this.#ui.append(
+                `✓ Live index ${recoveredFromFailure ? "recovered" : "ready"} for ${status.branch ?? "the worktree"} · ${status.target} · build ${status.indexBuildId.slice(0, 12)}…`,
+                "success",
+            );
+        }
     }
 }
 
