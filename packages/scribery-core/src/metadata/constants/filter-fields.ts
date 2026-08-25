@@ -6,6 +6,8 @@ export const FILTERABLE_METADATA_FIELDS = [
     "traits",
     "chunkingStrategy",
     "chunkKind",
+    "symbolNames",
+    "symbolKinds",
     "sourceId",
     "tags",
 ] as const;

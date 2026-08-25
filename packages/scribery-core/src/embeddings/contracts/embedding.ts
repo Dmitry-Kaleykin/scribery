@@ -1,4 +1,7 @@
-import type { EmbeddingModelIdentity } from "../../metadata/index.js";
+import type {
+    ChunkSemanticContext,
+    EmbeddingModelIdentity,
+} from "../../metadata/index.js";
 
 export type EmbeddingMode = "document" | "query";
 
@@ -52,4 +55,5 @@ export interface DocumentEmbeddingContent {
     language: string;
     content: string;
     kind?: string;
+    semanticContext?: ChunkSemanticContext;
 }

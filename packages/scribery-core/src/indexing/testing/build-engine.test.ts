@@ -103,6 +103,65 @@ describe("IndexBuildEngine", () => {
         assert.equal(result.indexedDocuments, 1);
         assert.ok(result.indexedChunks > 0);
     });
+
+    it("persists split-code symbol context and makes it filterable", async () => {
+        const bytes = new TextEncoder().encode([
+            "export class Resolution {",
+            "    init(data) {",
+            ...Array.from(
+                { length: 16 },
+                (_, index) => `        this.value${index} = data.value${index};`,
+            ),
+            "    }",
+            "}",
+            "",
+        ].join("\n"));
+        const storage = new InMemoryStorageProvider();
+        const result = await new IndexBuildEngine(
+            storage,
+            new DeterministicFakeEmbeddingProvider(8),
+            createTestRuntime(),
+        ).build({
+            source: snapshot("resolution.js", bytes),
+            plan: {
+                policy: castPolicy,
+                policyIdentity: "code-only:test",
+                strategies: ["cast"],
+                maximumChunkSize: 160,
+            },
+        });
+        const build = await storage.getBuild(result.indexBuildId);
+
+        assert.ok(build);
+        const stored = await storage.vectorSearch({
+            repositoryId: build.repositoryId,
+            snapshotId: build.snapshotId,
+            indexBuildId: build.indexBuildId,
+            vector: Float32Array.from({ length: 8 }, () => 1),
+            modelIdentity: build.modelIdentity,
+            limit: 20,
+        });
+        const continuation = stored.find(({ chunk }) =>
+            chunk.content.includes("this.value8") &&
+            !chunk.content.includes("init(")
+        );
+
+        assert.ok(continuation);
+        assert.deepEqual(
+            continuation.chunk.metadata.semanticContext?.scope.map(
+                ({ name }) => name,
+            ),
+            ["Resolution", "init"],
+        );
+        assert.deepEqual(
+            continuation.filterMetadata.symbolNames,
+            ["Resolution", "init"],
+        );
+        assert.deepEqual(
+            continuation.filterMetadata.symbolKinds,
+            ["class", "method"],
+        );
+    });
 });
 
 function createTestRuntime(): DocumentProcessingRuntime {

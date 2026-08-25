@@ -8,6 +8,7 @@ import type {
 import { throwIfChunkingAborted } from "../../utils/throw-if-aborted.js";
 import { isPunctuationNode } from "./utils/is-punctuation-node.js";
 import { syntaxKindName } from "./utils/syntax-kind-name.js";
+import { extractTypeScriptSemantics } from "./extract-semantics.js";
 
 interface NativeNodeFrame {
     node: ts.Node;
@@ -80,7 +81,22 @@ export function normalizeTypeScriptSyntaxTree(
         throw new Error("The TypeScript AST root was not normalized");
     }
 
-    return { parserId, root };
+    const semantics = extractTypeScriptSemantics(
+        sourceFile,
+        content,
+        signal,
+    );
+
+    return {
+        parserId,
+        root,
+        ...(semantics.symbols.length === 0
+            ? {}
+            : { symbols: semantics.symbols }),
+        ...(semantics.imports.length === 0
+            ? {}
+            : { imports: semantics.imports }),
+    };
 }
 
 function collectNonEmptyChildren(node: ts.Node): readonly ts.Node[] {

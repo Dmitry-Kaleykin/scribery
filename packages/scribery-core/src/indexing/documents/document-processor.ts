@@ -359,6 +359,9 @@ export class PreparedDocumentProcessor {
                         ...(chunk.kind === undefined
                             ? {}
                             : { kind: chunk.kind }),
+                        ...(chunk.semanticContext === undefined
+                            ? {}
+                            : { semanticContext: chunk.semanticContext }),
                     };
                     const storedChunk: StoredChunk = {
                         metadata,
@@ -376,6 +379,9 @@ export class PreparedDocumentProcessor {
                                 ...(chunk.kind === undefined
                                     ? {}
                                     : { kind: chunk.kind }),
+                                ...(chunk.semanticContext === undefined
+                                    ? {}
+                                    : { semanticContext: chunk.semanticContext }),
                             },
                             this.#embeddingService.provider.identity.documentPrefix,
                             this.#embeddingService.provider.identity.embeddingSuffix,
@@ -388,6 +394,7 @@ export class PreparedDocumentProcessor {
                             planned.classification.traits,
                             chunk.strategy,
                             chunk.kind,
+                            chunk.semanticContext,
                         ),
                     });
                 });

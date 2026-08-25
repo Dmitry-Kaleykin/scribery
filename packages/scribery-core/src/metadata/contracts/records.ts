@@ -1,6 +1,7 @@
 import type { ContentKind, FileTrait } from "../../classification/index.js";
 import type { SupportedEncoding } from "../../shared/index.js";
 import type { SourceRange } from "./source-position.js";
+import type { ChunkSemanticContext } from "./code-context.js";
 
 export interface DocumentMetadata {
     schemaVersion: number;
@@ -36,6 +37,7 @@ export interface ChunkMetadata extends SourceRange {
     chunkingStrategy: string;
     chunkingIdentity: string;
     kind?: string;
+    semanticContext?: ChunkSemanticContext;
 }
 
 export type FilterValue = string | number | boolean;

@@ -1,4 +1,8 @@
 import { SourcePositionError, SourcePositionIndex } from "../../metadata/index.js";
+import type {
+    CodeSymbolReference,
+    SourceRange,
+} from "../../metadata/index.js";
 import type { ChunkingDocument } from "../contracts/chunk.js";
 import type {
     NormalizedSyntaxTree,
@@ -106,6 +110,59 @@ export function validateNormalizedSyntaxTree(
                 pendingNodes.push({ node: child, parent: node });
             }
         }
+    }
+
+    for (const symbol of tree.symbols ?? []) {
+        validateSemanticRange(sourcePositions, symbol.range, "symbol");
+        validateSymbolReference(symbol, "symbol");
+
+        for (const parent of symbol.scope) {
+            validateSymbolReference(parent, "symbol scope");
+        }
+    }
+
+    for (const syntaxImport of tree.imports ?? []) {
+        validateSemanticRange(sourcePositions, syntaxImport.range, "import");
+
+        if (
+            syntaxImport.source.trim().length === 0 ||
+            syntaxImport.bindings.some((binding) => binding.trim().length === 0)
+        ) {
+            throw invalidTree("Normalized syntax import metadata is invalid");
+        }
+    }
+}
+
+function validateSemanticRange(
+    sourcePositions: SourcePositionIndex,
+    range: SourceRange,
+    kind: string,
+): void {
+    try {
+        sourcePositions.validateRange(range);
+    } catch (error: unknown) {
+        if (error instanceof SourcePositionError) {
+            throw invalidTree(
+                `Normalized syntax ${kind} has an invalid source range`,
+                { sourcePositionCode: error.code },
+                error,
+            );
+        }
+
+        throw error;
+    }
+}
+
+function validateSymbolReference(
+    symbol: CodeSymbolReference,
+    kind: string,
+): void {
+    if (
+        symbol.name.trim().length === 0 ||
+        symbol.kind.trim().length === 0 ||
+        symbol.signature.trim().length === 0
+    ) {
+        throw invalidTree(`Normalized syntax ${kind} metadata is invalid`);
     }
 }
 

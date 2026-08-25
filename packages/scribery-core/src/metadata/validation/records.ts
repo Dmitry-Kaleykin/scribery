@@ -115,6 +115,34 @@ export function validateChunkMetadata(metadata: ChunkMetadata): void {
     ) {
         throw invalidMetadata("Chunk source range is invalid", metadata.chunkId);
     }
+
+    if (metadata.semanticContext !== undefined) {
+        validateSemanticContext(metadata.semanticContext, metadata.chunkId);
+    }
+}
+
+function validateSemanticContext(
+    context: NonNullable<ChunkMetadata["semanticContext"]>,
+    chunkId: string,
+): void {
+    for (const symbol of [...context.scope, ...context.symbols]) {
+        if (
+            symbol.name.trim().length === 0 ||
+            symbol.kind.trim().length === 0 ||
+            symbol.signature.trim().length === 0
+        ) {
+            throw invalidMetadata("Chunk symbol context is invalid", chunkId);
+        }
+    }
+
+    for (const syntaxImport of context.imports) {
+        if (
+            syntaxImport.source.trim().length === 0 ||
+            syntaxImport.bindings.some((binding) => binding.trim().length === 0)
+        ) {
+            throw invalidMetadata("Chunk import context is invalid", chunkId);
+        }
+    }
 }
 
 export function validateFilterMetadata(metadata: FilterMetadata): void {

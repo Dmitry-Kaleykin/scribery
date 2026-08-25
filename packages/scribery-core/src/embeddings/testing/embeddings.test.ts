@@ -139,6 +139,32 @@ describe("embeddings", () => {
         assert.equal(query.text, "query: find answer<|endoftext|>");
     });
 
+    it("adds parent symbols to orphaned body fragments without changing code", () => {
+        const content = "        this.cache.set(key, value);\n";
+        const input = formatDocumentEmbeddingInput("chunk", {
+            path: "src/resolution.ts",
+            language: "typescript",
+            content,
+            semanticContext: {
+                scope: [{
+                    name: "Resolution",
+                    kind: "class",
+                    signature: "export class Resolution",
+                }, {
+                    name: "init",
+                    kind: "method",
+                    signature: "init(data: ResolutionData): void",
+                }],
+                symbols: [],
+                imports: [],
+            },
+        });
+
+        assert.doesNotMatch(content, /Resolution|init/u);
+        assert.match(input.text, /scope: class Resolution > method init/u);
+        assert.ok(input.text.endsWith(`\n\n${content}`));
+    });
+
     it("rejects invalid provider configuration before making a request", () => {
         assert.throws(() => new DeterministicFakeEmbeddingProvider(0));
         assert.throws(() => new LmStudioEmbeddingProvider({

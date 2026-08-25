@@ -1,4 +1,8 @@
-import type { SourceRange } from "../../metadata/index.js";
+import type {
+    SourceRange,
+    SyntaxImport,
+    SyntaxSymbol,
+} from "../../metadata/index.js";
 
 export interface SyntaxNode {
     type: string;
@@ -9,4 +13,6 @@ export interface SyntaxNode {
 export interface NormalizedSyntaxTree {
     parserId: string;
     root: SyntaxNode;
+    symbols?: readonly SyntaxSymbol[];
+    imports?: readonly SyntaxImport[];
 }

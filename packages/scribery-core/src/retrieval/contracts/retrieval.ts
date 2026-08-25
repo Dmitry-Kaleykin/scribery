@@ -1,4 +1,7 @@
-import type { SourceRange } from "../../metadata/index.js";
+import type {
+    ChunkSemanticContext,
+    SourceRange,
+} from "../../metadata/index.js";
 import type { StorageFilterCondition } from "../../storage/index.js";
 
 export interface RetrievalContextOptions {
@@ -34,6 +37,7 @@ export interface RetrievalContextChunk {
     content: string;
     range: SourceRange;
     kind?: string;
+    semanticContext?: ChunkSemanticContext;
 }
 
 export interface RetrievalContext {
@@ -59,5 +63,6 @@ export interface RetrievalResult {
     content: string;
     range: SourceRange;
     kind?: string;
+    semanticContext?: ChunkSemanticContext;
     context?: RetrievalContext;
 }

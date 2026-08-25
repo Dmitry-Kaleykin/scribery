@@ -94,18 +94,25 @@ document formatter. Metadata should not be added to embedding input accidentally
 The exact text embedded for a chunk is part of the retrieval design and must be
 deterministic.
 
-For example, a code chunk might be formatted as:
+The current code formatter emits deterministic lower-case fields. For example:
 
 ```
-File: src/auth/session.ts
-Language: TypeScript
-Symbol: createSession
+formatter: embedding-input-v2
+path: src/auth/session.ts
+language: typescript
+scope: class SessionService > method createSession
+defines: method createSession(user: User): Session
+imports: User from ./user.js
 
 <original chunk content>
 ```
 
-This contextual header can improve retrieval, but it also consumes the model's
-input limit and changes the resulting vector.
+The semantic fields are present when the parser can supply them. They improve
+retrieval of a split method-body fragment by names that may occur only in its
+parent declaration. The original chunk remains byte-for-byte unchanged after
+the blank-line separator. This contextual header consumes the model's input
+limit and changes the resulting vector; its formatter version is therefore part
+of artifact compatibility and requires re-embedding existing chunks.
 
 ## Results
 

@@ -20,6 +20,7 @@ export function formatDocumentChunks(
         output += `--- Chunk ${position + 1}/${result.chunks.length}` +
             ` | index=${chunk.metadata.index}` +
             ` | kind=${kind}` +
+            formatScope(chunk.metadata.semanticContext?.scope) +
             ` | lines=${chunk.metadata.startLine}-${chunk.metadata.endLine}` +
             ` | offsets=${chunk.metadata.startOffset}-${chunk.metadata.endOffset}` +
             " ---\n";
@@ -33,6 +34,16 @@ export function formatDocumentChunks(
     }
 
     return output;
+}
+
+function formatScope(
+    scope: NonNullable<
+        DocumentChunks["chunks"][number]["metadata"]["semanticContext"]
+    >["scope"] | undefined,
+): string {
+    return scope === undefined || scope.length === 0
+        ? ""
+        : ` | scope=${scope.map(({ name }) => name).join(" > ")}`;
 }
 
 export function serializeDocumentChunks(

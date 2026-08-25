@@ -183,6 +183,16 @@ nodes such as `EqualsGreaterThanToken`; their exact text remains in the
 surrounding source envelope so punctuation cannot become an independent chunk.
 Identifiers, literals, and structural nodes remain available to cAST.
 
+The TypeScript adapter also emits a compact semantic sidecar for declarations
+and imports. Class, interface, enum, type, function, constructor, accessor,
+method, and function-valued variable declarations retain their normalized
+signature and enclosing symbol chain. Each resulting JavaScript or TypeScript
+chunk receives the smallest enclosing chain, declarations that start inside its
+range, and imports referenced by identifiers in its exact source slice. This
+metadata is deliberately separate from `chunk.content`: concatenation still
+reconstructs the source exactly, while split method bodies remain searchable by
+their class and method names.
+
 `PythonParser` supports `python` and `python-stub`. It uses the Python grammar and
 WASM runtime shipped by `@vscode/tree-sitter-wasm`, so parser setup does not
 depend on a platform-specific native addon or local compiler toolchain. The

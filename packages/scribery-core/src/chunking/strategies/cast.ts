@@ -8,6 +8,7 @@ import type {
 } from "../contracts/chunk.js";
 import type { ChunkingStrategy } from "../contracts/strategy.js";
 import type { SyntaxNode } from "../contracts/syntax-tree.js";
+import type { NormalizedSyntaxTree } from "../contracts/syntax-tree.js";
 import { ChunkingError } from "../errors/chunking-error.js";
 import { ParserRegistry } from "../parsers/registry.js";
 import { throwIfChunkingAborted } from "../utils/throw-if-aborted.js";
@@ -25,6 +26,7 @@ import {
     isDanglingPrefix,
 } from "./cast/utils/dangling-prefixes.js";
 import { compactSmallFragments } from "./cast/utils/small-fragments.js";
+import { semanticContextFor } from "./cast/utils/semantic-context.js";
 
 interface EmitFragmentTask {
     operation: "emit";
@@ -77,7 +79,13 @@ export class CastChunkingStrategy implements ChunkingStrategy {
             options.signal,
         );
 
-        return createChunks(document, fragments, this.id, options.signal);
+        return createChunks(
+            document,
+            fragments,
+            tree,
+            this.id,
+            options.signal,
+        );
     }
 }
 
@@ -329,6 +337,7 @@ function sourceFragmentFrom(
 function createChunks(
     document: ChunkingDocument,
     fragments: readonly SourceFragment[],
+    tree: NormalizedSyntaxTree,
     strategy: "cast",
     signal?: AbortSignal,
 ): Chunk[] {
@@ -354,11 +363,17 @@ function createChunks(
             fragment.startOffset,
             fragment.endOffset,
         );
+        const semanticContext = semanticContextFor(
+            fragment,
+            tree,
+            document.content,
+        );
         chunks.push({
             content: sourceSlice.content,
             range: sourceSlice.range,
             strategy,
             ...(fragment.kind === undefined ? {} : { kind: fragment.kind }),
+            ...(semanticContext === undefined ? {} : { semanticContext }),
             ...(fragment.boundaryAffinity === undefined
                 ? {}
                 : { searchable: false }),

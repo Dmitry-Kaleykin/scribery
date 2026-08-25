@@ -16,7 +16,7 @@ describe("chunks CLI formatting", () => {
         assert.match(output, /^Chunks: 2$/mu);
         assert.match(
             output,
-            /^--- Chunk 1\/2 \| index=0 \| kind=FunctionDeclaration \| lines=1-2 \| offsets=0-32 ---$/mu,
+            /^--- Chunk 1\/2 \| index=0 \| kind=FunctionDeclaration \| scope=first \| lines=1-2 \| offsets=0-32 ---$/mu,
         );
         assert.match(output, /export function first\(\) \{\}\n\n--- Chunk 2\/2/u);
         assert.ok(output.endsWith("export const second = true;\n\n"));
@@ -77,6 +77,19 @@ function fixture(): DocumentChunks {
                     chunkingStrategy: "cast",
                     chunkingIdentity: "cast-v1:3000",
                     kind: "FunctionDeclaration",
+                    semanticContext: {
+                        scope: [{
+                            name: "first",
+                            kind: "function",
+                            signature: "export function first()",
+                        }],
+                        symbols: [{
+                            name: "first",
+                            kind: "function",
+                            signature: "export function first()",
+                        }],
+                        imports: [],
+                    },
                 },
             },
             {

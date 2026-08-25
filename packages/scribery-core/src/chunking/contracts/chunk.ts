@@ -1,4 +1,7 @@
-import type { SourceRange } from "../../metadata/index.js";
+import type {
+    ChunkSemanticContext,
+    SourceRange,
+} from "../../metadata/index.js";
 import type { ChunkingStrategyId } from "../../shared/index.js";
 
 export interface ChunkingDocument {
@@ -13,6 +16,7 @@ export interface Chunk {
     range: SourceRange;
     strategy: ChunkingStrategyId;
     kind?: string;
+    semanticContext?: ChunkSemanticContext;
     searchable?: boolean;
 }
 

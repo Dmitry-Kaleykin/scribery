@@ -19,6 +19,13 @@ export type {
     FilterValue,
 } from "./contracts/records.js";
 export type {
+    ChunkSemanticContext,
+    CodeImportReference,
+    CodeSymbolReference,
+    SyntaxImport,
+    SyntaxSymbol,
+} from "./contracts/code-context.js";
+export type {
     SourceRange,
     SourceSlice,
 } from "./contracts/source-position.js";

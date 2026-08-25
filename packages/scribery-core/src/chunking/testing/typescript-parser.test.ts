@@ -129,6 +129,72 @@ describe("TypeScriptParser", () => {
         assert.equal(findNode(tree.root, "FirstStatement"), undefined);
     });
 
+    it("retains symbol, scope, signature, and import context for split code", async () => {
+        const sourceDocument = document({
+            content: [
+                'import { reactive as makeReactive, isReactive } from "vue";',
+                "",
+                "export class Resolution {",
+                "    init(data: Record<string, unknown>): unknown {",
+                ...Array.from(
+                    { length: 20 },
+                    (_, index) => `        this.value${index} = data.value${index};`,
+                ),
+                "        return isReactive(data) ? data : makeReactive(data);",
+                "    }",
+                "}",
+                "",
+            ].join("\n"),
+        });
+        const registry = createInitialParserRegistry();
+        const tree = await registry.parse(sourceDocument);
+        const resolution = tree.symbols?.find(({ name }) =>
+            name === "Resolution"
+        );
+        const init = tree.symbols?.find(({ name }) => name === "init");
+
+        assert.equal(resolution?.kind, "class");
+        assert.equal(resolution?.signature, "export class Resolution");
+        assert.deepEqual(init?.scope.map(({ name }) => name), ["Resolution"]);
+        assert.equal(
+            init?.signature,
+            "init(data: Record<string, unknown>): unknown",
+        );
+        assert.deepEqual(tree.imports, [{
+            source: "vue",
+            bindings: ["makeReactive", "isReactive"],
+            range: tree.imports?.[0]?.range,
+        }]);
+
+        const chunks = await new CastChunkingStrategy(registry).chunk(
+            sourceDocument,
+            { maximumSize: 220, sizeUnit: "utf16-code-units" },
+        );
+        const bodyContinuation = chunks.find(({ content }) =>
+            content.includes("this.value10") && !content.includes("init(")
+        );
+        const returnChunk = chunks.find(({ content }) =>
+            content.includes("makeReactive(data)")
+        );
+
+        assert.ok(bodyContinuation);
+        assert.deepEqual(
+            bodyContinuation.semanticContext?.scope.map(({ name }) => name),
+            ["Resolution", "init"],
+        );
+        assert.deepEqual(
+            returnChunk?.semanticContext?.imports,
+            [{
+                source: "vue",
+                bindings: ["makeReactive", "isReactive"],
+            }],
+        );
+        assert.equal(
+            chunks.map(({ content }) => content).join(""),
+            sourceDocument.content,
+        );
+    });
+
     it("keeps punctuation tokens in source envelopes instead of AST nodes", async () => {
         const sourceDocument = document({
             path: "server/app.test.ts",

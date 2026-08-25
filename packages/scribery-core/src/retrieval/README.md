@@ -399,10 +399,13 @@ context: {
 
 The primary match is not merged or rewritten. Each returned match instead receives
 `context.before` and `context.after`, whose entries retain their chunk ID, source
-index, content, range, and optional cAST kind. Chunks that are already primary
+index, content, range, optional cAST kind, and available semantic sidecar. Chunks that are already primary
 matches in the same response are omitted from context. The character budget admits
 only complete chunks, starting with the nearest preceding and following chunks.
-Parent-symbol and related-declaration expansion remain future strategies.
+Fetching parent declarations as additional source chunks and related-declaration
+expansion remain future strategies. JavaScript and TypeScript primary matches
+already retain their enclosing symbol chain and signatures as metadata; this is
+included in reranking input and result formatting without duplicating source.
 
 Expanded context must:
 
@@ -545,6 +548,8 @@ The first implementation includes:
 - deterministic result ordering and deduplication;
 - exact path, range, and identity attribution;
 - optional, count- and character-bounded neighboring cAST context;
+- JavaScript and TypeScript parent-symbol metadata in vector input, reranking,
+  filters, and attributed results;
 - cancellation and structured diagnostics;
 - optional local Qwen3 reranking through a provider-independent boundary.
 
@@ -553,8 +558,8 @@ add hard `sourceId` and tag scopes. These filters are applied before ranking; an
 explicitly empty collection scope returns no results.
 
 Plain-text document retrieval, lexical search, hybrid fusion, hosted reranking,
-diversity rules, parent-symbol context, cross-snapshot search, and permission-policy
-integration are later work.
+diversity rules, parent-declaration source expansion, cross-snapshot search, and
+permission-policy integration are later work.
 
 ## Implemented layout
 

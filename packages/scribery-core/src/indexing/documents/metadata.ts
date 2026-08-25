@@ -1,5 +1,6 @@
 import type { DefaultFileClassifier } from "../../classification/index.js";
 import {
+    type ChunkSemanticContext,
     METADATA_SCHEMA_VERSION,
     hashText,
     type DocumentMetadata,
@@ -64,7 +65,11 @@ export function createPreparedDocumentFilterMetadata(
     traits: readonly string[],
     chunkingStrategy: string,
     chunkKind: string | undefined,
+    semanticContext?: ChunkSemanticContext,
 ) {
+    const symbols = semanticContext === undefined
+        ? []
+        : [...semanticContext.scope, ...semanticContext.symbols];
     return {
         path,
         language,
@@ -79,6 +84,12 @@ export function createPreparedDocumentFilterMetadata(
             ? {}
             : { tags: document.tags }),
         ...(chunkKind === undefined ? {} : { chunkKind }),
+        ...(symbols.length === 0
+            ? {}
+            : {
+                symbolNames: [...new Set(symbols.map(({ name }) => name))],
+                symbolKinds: [...new Set(symbols.map(({ kind }) => kind))],
+            }),
     };
 }
 
@@ -89,4 +100,3 @@ function extensionOf(path: string): string | undefined {
         ? undefined
         : filename.slice(dot + 1).toLowerCase();
 }
-

@@ -31,6 +31,7 @@ import type {
     VectorSearchResult,
 } from "../../storage/index.js";
 import { RetrievalError, SemanticRetriever } from "../index.js";
+import { formatRerankingCandidate } from "../reranking/format-candidate.js";
 
 const model: EmbeddingModelIdentity = {
     provider: "retrieval-reranking-fixture",
@@ -41,6 +42,44 @@ const model: EmbeddingModelIdentity = {
 };
 
 describe("semantic retrieval reranking", () => {
+    it("gives rerankers parent-symbol context for split fragments", () => {
+        const candidate = formatRerankingCandidate({
+            score: 0.8,
+            repositoryId: "repository",
+            snapshotId: "snapshot",
+            indexBuildId: "build",
+            documentId: "document",
+            chunkId: "chunk",
+            path: "src/resolution.ts",
+            language: "typescript",
+            format: "typescript",
+            content: "this.cache.set(key, value);",
+            range: {
+                startOffset: 100,
+                endOffset: 127,
+                startLine: 8,
+                endLine: 8,
+            },
+            semanticContext: {
+                scope: [{
+                    name: "Resolution",
+                    kind: "class",
+                    signature: "export class Resolution",
+                }, {
+                    name: "init",
+                    kind: "method",
+                    signature: "init(data: ResolutionData): void",
+                }],
+                symbols: [],
+                imports: [{ source: "./cache.js", bindings: ["Cache"] }],
+            },
+        });
+
+        assert.match(candidate, /Scope: class Resolution > method init/u);
+        assert.match(candidate, /Imports: Cache from \.\/cache\.js/u);
+        assert.ok(candidate.endsWith("Code:\nthis.cache.set(key, value);"));
+    });
+
     it("reranks over-fetched candidates before selecting and expanding context", async () => {
         const storage = new RetrievalFixtureStorage();
         const embeddingProvider = new StaticEmbeddingProvider();

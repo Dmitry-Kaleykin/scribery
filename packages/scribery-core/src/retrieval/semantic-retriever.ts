@@ -152,6 +152,9 @@ export class SemanticRetriever {
             ...(chunk.metadata.kind === undefined
                 ? {}
                 : { kind: chunk.metadata.kind }),
+            ...(chunk.metadata.semanticContext === undefined
+                ? {}
+                : { semanticContext: chunk.metadata.semanticContext }),
         }));
 
         if (rerankingOptions !== undefined && retrievalResults.length > 0) {

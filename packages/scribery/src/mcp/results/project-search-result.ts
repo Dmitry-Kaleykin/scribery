@@ -31,10 +31,34 @@ function formatMatch(result: RetrievalResult, rank: number): string {
 
     return [
         `### ${rank}. ${location}`,
+        ...semanticContextLines(result),
         `${fence}${fenceLanguage(result.language)}`,
         content,
         fence,
     ].join("\n");
+}
+
+function semanticContextLines(result: RetrievalResult): readonly string[] {
+    const context = result.semanticContext;
+
+    if (context === undefined) return [];
+
+    return [
+        ...(context.scope.length === 0
+            ? []
+            : [`Scope: ${context.scope.map((symbol) =>
+                `${symbol.kind} ${symbol.name}`
+            ).join(" > ")}`]),
+        ...context.symbols.map((symbol) =>
+            `Defines: ${symbol.kind} ${symbol.signature}`
+        ),
+        ...context.imports.map((syntaxImport) =>
+            syntaxImport.bindings.length === 0
+                ? `Imports: ${syntaxImport.source}`
+                : `Imports: ${syntaxImport.bindings.join(", ")} from ` +
+                    syntaxImport.source
+        ),
+    ];
 }
 
 function joinedContent(result: RetrievalResult): string {

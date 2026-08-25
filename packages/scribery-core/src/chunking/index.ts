@@ -15,6 +15,13 @@ export type {
     NormalizedSyntaxTree,
     SyntaxNode,
 } from "./contracts/syntax-tree.js";
+export type {
+    ChunkSemanticContext,
+    CodeImportReference,
+    CodeSymbolReference,
+    SyntaxImport,
+    SyntaxSymbol,
+} from "../metadata/index.js";
 export {
     ChunkingError,
     type ChunkingErrorCode,

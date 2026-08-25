@@ -1,3 +1,3 @@
-export const EMBEDDING_FORMATTER_VERSION = "embedding-input-v1";
+export const EMBEDDING_FORMATTER_VERSION = "embedding-input-v2";
 export const DEFAULT_EMBEDDING_BATCH_INPUTS = 32;
 export const DEFAULT_EMBEDDING_BATCH_CHARACTERS = 64_000;

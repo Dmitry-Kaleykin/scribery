@@ -25,6 +25,22 @@ describe("MCP project search result formatting", () => {
                     startLine: 42,
                     endLine: 44,
                 },
+                semanticContext: {
+                    scope: [{
+                        name: "SessionService",
+                        kind: "class",
+                        signature: "export class SessionService",
+                    }],
+                    symbols: [{
+                        name: "authenticate",
+                        kind: "method",
+                        signature: "authenticate(): boolean",
+                    }],
+                    imports: [{
+                        source: "./session.js",
+                        bindings: ["session"],
+                    }],
+                },
                 context: {
                     before: [{
                         chunkId: "before",
@@ -56,6 +72,9 @@ describe("MCP project search result formatting", () => {
 
         assert.match(text, /Found 1 relevant code excerpt\./u);
         assert.match(text, /### 1\. src\/auth\/session\.ts:42-44/u);
+        assert.match(text, /Scope: class SessionService/u);
+        assert.match(text, /Defines: method authenticate\(\): boolean/u);
+        assert.match(text, /Imports: session from \.\/session\.js/u);
         assert.match(text, /````typescript/u);
         assert.match(text, /const session = readSession\(\);/u);
         assert.match(text, /export function authenticate/u);

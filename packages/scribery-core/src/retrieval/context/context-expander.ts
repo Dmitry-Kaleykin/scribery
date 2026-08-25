@@ -110,6 +110,9 @@ function toContextChunk(chunk: StoredChunk): RetrievalContextChunk {
             endLine: chunk.metadata.endLine,
         },
         ...(chunk.metadata.kind === undefined ? {} : { kind: chunk.metadata.kind }),
+        ...(chunk.metadata.semanticContext === undefined
+            ? {}
+            : { semanticContext: chunk.metadata.semanticContext }),
     };
 }
 
