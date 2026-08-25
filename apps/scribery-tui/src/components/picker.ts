@@ -15,6 +15,7 @@ export interface PickerOptions {
     title: string;
     items: readonly SelectItem[];
     onSelect: (item: SelectItem) => void;
+    onDelete?: (item: SelectItem) => void;
     onCancel: () => void;
     requestRender: () => void;
     maxVisible?: number;
@@ -26,11 +27,13 @@ export class Picker implements Component, Focusable {
     readonly #input = new Input();
     readonly #list: SelectList;
     readonly #requestRender: () => void;
+    readonly #onDelete: ((item: SelectItem) => void) | undefined;
     #focused = false;
 
     constructor(options: PickerOptions) {
         this.#title = options.title;
         this.#requestRender = options.requestRender;
+        this.#onDelete = options.onDelete;
         this.#list = new SelectList(
             [...options.items],
             options.maxVisible ?? 10,
@@ -54,6 +57,14 @@ export class Picker implements Component, Focusable {
     }
 
     handleInput(data: string): void {
+        if (matchesKey(data, Key.ctrl("d")) && this.#onDelete !== undefined) {
+            const selected = this.#list.getSelectedItem();
+
+            if (selected !== null) this.#onDelete(selected);
+            this.#requestRender();
+            return;
+        }
+
         if (
             matchesKey(data, Key.up) ||
             matchesKey(data, Key.down) ||
@@ -79,7 +90,14 @@ export class Picker implements Component, Focusable {
             "",
             ...this.#list.render(innerWidth).map((item) => truncateToWidth(`  ${item}`, width)),
             "",
-            truncateToWidth(`  ${colors.muted("↑↓ navigate · Enter select · Esc cancel")}`, width),
+            truncateToWidth(
+                `  ${colors.muted(
+                    this.#onDelete === undefined
+                        ? "↑↓ navigate · Enter select · Esc cancel"
+                        : "↑↓ navigate · Enter select · Ctrl+D delete · Esc cancel",
+                )}`,
+                width,
+            ),
             line,
         ];
     }

@@ -16,6 +16,13 @@ import type { TranscriptTone } from "./contracts.js";
 export interface ProjectUi {
     append(message: string, tone?: TranscriptTone): void;
     pick(title: string, items: readonly SelectItem[]): Promise<SelectItem | undefined>;
+    pickWithDelete(
+        title: string,
+        items: readonly SelectItem[],
+    ): Promise<{
+        action: "select" | "delete";
+        item: SelectItem;
+    } | undefined>;
     input(title: string, label: string, initialValue?: string): Promise<string | undefined>;
     confirm(title: string, defaultYes?: boolean): Promise<boolean>;
     copy(value: string): void;
@@ -114,22 +121,84 @@ export class ProjectController {
 
     async browseBuilds(): Promise<void> {
         const project = this.#requiredProject();
-        const storage = new SqliteStorageProvider(project.databasePath, { readOnly: true, immutable: true });
-        try {
-            const builds = await storage.listBuilds();
+
+        while (true) {
+            const storage = new SqliteStorageProvider(project.databasePath, {
+                readOnly: true,
+                immutable: true,
+            });
+            const builds = await storage.listBuilds().finally(() => storage.close());
+
             if (builds.length === 0) {
                 this.#ui.append("This project has no builds.", "muted");
                 return;
             }
-            const selection = await this.#ui.pick("Build history", builds.map((build) => ({
-                value: build.indexBuildId,
-                label: `${build.indexBuildId.slice(0, 12)}  ${build.status}`,
-                description: `${build.modelIdentity.model} · ${relativeTime(build.completedAt ?? build.createdAt)}`,
-            })));
-            const build = builds.find(({ indexBuildId }) => indexBuildId === selection?.value);
-            if (build) this.#ui.append(JSON.stringify(build, null, 2));
-        } finally {
-            await storage.close();
+            const targetListing = await this.#targets.list(
+                project.projectIdentifier,
+                this.#cwd,
+            );
+            const items = builds.map((build) => {
+                const protection = buildProtection(
+                    targetListing,
+                    build.indexBuildId,
+                );
+                return {
+                    value: build.indexBuildId,
+                    label: `${build.indexBuildId.slice(0, 12)}  ${build.status}`,
+                    description: [
+                        build.modelIdentity.model,
+                        relativeTime(build.completedAt ?? build.createdAt),
+                        protection,
+                    ].filter(Boolean).join(" · "),
+                };
+            });
+            const outcome = this.#liveRunning()
+                ? await this.#ui.pick("Build history", items).then((item) =>
+                    item === undefined
+                        ? undefined
+                        : { action: "select" as const, item }
+                )
+                : await this.#ui.pickWithDelete("Build history", items);
+
+            if (outcome === undefined) return;
+
+            const build = builds.find(({ indexBuildId }) =>
+                indexBuildId === outcome.item.value
+            );
+            if (build === undefined) return;
+
+            if (outcome.action === "select") {
+                this.#ui.append(JSON.stringify(build, null, 2));
+                return;
+            }
+
+            const protection = buildProtection(targetListing, build.indexBuildId);
+            if (protection !== undefined) {
+                this.#ui.append(
+                    `Build ${build.indexBuildId.slice(0, 12)} is ${protection} and cannot be deleted.`,
+                    "warning",
+                );
+                continue;
+            }
+            if (!await this.#ui.confirm(
+                `Delete build ${build.indexBuildId.slice(0, 12)}? Indexed artifacts will be removed; source files will not be touched.`,
+                false,
+            )) {
+                continue;
+            }
+
+            const deleted = await this.#targets.deleteBuild(
+                project.projectIdentifier,
+                build.indexBuildId,
+                this.#cwd,
+            );
+            await this.#refreshProjects(project.projectIdentifier);
+            this.#ui.append(
+                `Deleted build ${build.indexBuildId.slice(0, 12)}: ` +
+                    `${deleted.deletedChunks} chunks and ` +
+                    `${deleted.deletedEmbeddings} embeddings removed.`,
+                "success",
+            );
         }
     }
 
@@ -238,4 +307,29 @@ function relativeTime(value?: string): string {
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function buildProtection(
+    listing: Readonly<Record<string, unknown>>,
+    indexBuildId: string,
+): string | undefined {
+    const active = isRecord(listing.active) ? listing.active : undefined;
+    if (active?.indexBuildId === indexBuildId) return "active";
+
+    const targets = Array.isArray(listing.targets)
+        ? listing.targets.filter(isRecord)
+        : [];
+
+    for (const target of targets) {
+        const name = String(target.name ?? "unnamed");
+        if (target.indexBuildId === indexBuildId) return `used by target ${name}`;
+        if (
+            Array.isArray(target.retainedBuildIds) &&
+            target.retainedBuildIds.includes(indexBuildId)
+        ) {
+            return `retained by target ${name}`;
+        }
+    }
+
+    return undefined;
 }

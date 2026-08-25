@@ -8,6 +8,11 @@ import {
 import { Picker } from "../components/picker.js";
 import { TextPrompt } from "../components/text-prompt.js";
 
+export interface PickerOutcome {
+    action: "select" | "delete";
+    item: SelectItem;
+}
+
 export class DialogHost {
     readonly #ui: TuiMainScreen;
     readonly #editor: Editor;
@@ -28,11 +33,26 @@ export class DialogHost {
         title: string,
         items: readonly SelectItem[],
     ): Promise<SelectItem | undefined> {
+        return (await this.#pick(title, items, false))?.item;
+    }
+
+    pickWithDelete(
+        title: string,
+        items: readonly SelectItem[],
+    ): Promise<PickerOutcome | undefined> {
+        return this.#pick(title, items, true);
+    }
+
+    async #pick(
+        title: string,
+        items: readonly SelectItem[],
+        allowDelete: boolean,
+    ): Promise<PickerOutcome | undefined> {
         if (items.length === 0) return undefined;
         return new Promise((resolveSelection) => {
             this.#active = true;
             let settled = false;
-            const finish = (item?: SelectItem): void => {
+            const finish = (outcome?: PickerOutcome): void => {
                 if (settled) return;
                 settled = true;
                 this.#active = false;
@@ -40,12 +60,18 @@ export class DialogHost {
                 this.#ui.addChild(this.#editorArea);
                 this.#ui.setFocus(this.#editor);
                 this.#ui.requestRender(true);
-                resolveSelection(item);
+                resolveSelection(outcome);
             };
             const picker = new Picker({
                 title,
                 items,
-                onSelect: (item) => finish(item),
+                onSelect: (item) => finish({ action: "select", item }),
+                ...(allowDelete
+                    ? {
+                        onDelete: (item: SelectItem) =>
+                            finish({ action: "delete", item }),
+                    }
+                    : {}),
                 onCancel: () => finish(),
                 requestRender: () => this.#ui.requestRender(),
             });

@@ -262,6 +262,8 @@ export class ScriberyTuiApp {
             ui: {
                 append: (message, tone) => this.#append(message, tone),
                 pick: (title, items) => this.#dialogs.pick(title, items),
+                pickWithDelete: (title, items) =>
+                    this.#dialogs.pickWithDelete(title, items),
                 input: (title, label, initialValue) =>
                     this.#dialogs.input(title, label, initialValue),
                 confirm: (title, defaultYes) => this.#dialogs.confirm(title, defaultYes),

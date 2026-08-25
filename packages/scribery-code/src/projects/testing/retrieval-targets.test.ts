@@ -241,6 +241,50 @@ describe("project retrieval targets", () => {
             indexBuildId: "build_1",
         });
     });
+
+    it("deletes only builds that are neither active nor target-referenced", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "scribery-delete-build-"));
+        const indexesDirectory = join(directory, "indexes");
+        const root = join(directory, "project");
+        const databasePath = managedDatabasePath(root, indexesDirectory);
+        await mkdir(dirname(databasePath), { recursive: true });
+        const manifest = await writeManagedProjectManifest(
+            root,
+            databasePath,
+            indexesDirectory,
+        );
+        assert.ok(manifest);
+        await createReadyBuild(databasePath, "build_target", 1);
+        await createReadyBuild(databasePath, "build_obsolete", 2);
+        await createReadyBuild(databasePath, "build_active", 3);
+
+        const service = new ProjectRetrievalTargetService({ indexesDirectory });
+        await service.assignTarget(
+            manifest.projectIdentifier,
+            "legacy",
+            "build_target",
+        );
+
+        await assert.rejects(
+            service.deleteBuild(undefined, "build_active", root),
+            /active or referenced/u,
+        );
+        await assert.rejects(
+            service.deleteBuild(undefined, "build_target", root),
+            /active or referenced/u,
+        );
+
+        const deleted = await service.deleteBuild(
+            undefined,
+            "build_obsolete",
+            root,
+        );
+        assert.equal(deleted.indexBuildId, "build_obsolete");
+        assert.deepEqual(
+            await buildIds(databasePath),
+            ["build_active", "build_target"],
+        );
+    });
 });
 
 async function buildIds(databasePath: string): Promise<readonly string[]> {

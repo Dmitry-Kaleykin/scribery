@@ -219,6 +219,39 @@ export class ProjectRetrievalTargetService {
         );
     }
 
+    async deleteBuild(
+        reference: string | undefined,
+        indexBuildId: string,
+        currentDirectory = process.cwd(),
+    ): Promise<DeletedIndexBuild> {
+        const project = await this.resolveProject(reference, currentDirectory);
+        const manifest = await this.#catalog.read(project.projectIdentifier);
+        const protectedBuildIds = new Set(referencedBuildIds(manifest));
+        const active = resolveSelection(manifest, project);
+
+        if (active !== undefined) {
+            protectedBuildIds.add(active.indexBuildId);
+        }
+
+        if (protectedBuildIds.has(indexBuildId)) {
+            throw new Error(
+                `Index build ${indexBuildId} is active or referenced by a retrieval target and cannot be deleted`,
+            );
+        }
+
+        const storage = new SqliteStorageProvider(project.databasePath);
+
+        try {
+            if (await storage.getBuild(indexBuildId) === undefined) {
+                throw new Error(`Index build ${indexBuildId} was not found`);
+            }
+
+            return await storage.deleteBuild(indexBuildId);
+        } finally {
+            await storage.close();
+        }
+    }
+
     async #readyBuild(
         project: IndexedProjectSummary,
         indexBuildId: string,
