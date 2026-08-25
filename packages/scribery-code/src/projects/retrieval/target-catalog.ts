@@ -85,7 +85,9 @@ export class ProjectRetrievalTargetCatalog {
         selection: ProjectRetrievalSelection,
     ): Promise<ProjectRetrievalTargets> {
         const manifest = await this.read(projectIdentifier);
-        const active = selection.type === "target"
+        const active = selection.type === "none"
+            ? { type: "none" as const }
+            : selection.type === "target"
             ? {
                 type: "target" as const,
                 target: normalizeRetrievalTargetName(selection.target),
@@ -269,6 +271,7 @@ function validateSelection(
     if (!isRecord(value) || typeof value.type !== "string") {
         throw new Error("Project retrieval selection is invalid");
     }
+    if (value.type === "none") return { type: "none" };
     if (value.type === "target" && typeof value.target === "string") {
         const target = normalizeRetrievalTargetName(value.target);
         if (!targets.has(target)) {

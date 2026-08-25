@@ -8,6 +8,9 @@ export interface ProjectRetrievalTarget {
 
 export type ProjectRetrievalSelection =
     | {
+        type: "none";
+    }
+    | {
         type: "target";
         target: string;
     }

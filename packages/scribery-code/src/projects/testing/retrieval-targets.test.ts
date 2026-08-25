@@ -285,6 +285,49 @@ describe("project retrieval targets", () => {
             ["build_active", "build_target"],
         );
     });
+
+    it("supports an explicitly inactive project so every build can be removed", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "scribery-inactive-"));
+        const indexesDirectory = join(directory, "indexes");
+        const root = join(directory, "project");
+        const databasePath = managedDatabasePath(root, indexesDirectory);
+        await mkdir(dirname(databasePath), { recursive: true });
+        const manifest = await writeManagedProjectManifest(
+            root,
+            databasePath,
+            indexesDirectory,
+        );
+        assert.ok(manifest);
+        await createReadyBuild(databasePath, "build_1", 1);
+        await createReadyBuild(databasePath, "build_2", 2);
+
+        const service = new ProjectRetrievalTargetService({ indexesDirectory });
+        await service.assignTarget(
+            manifest.projectIdentifier,
+            "release",
+            "build_1",
+            true,
+        );
+        await service.deactivate(undefined, root);
+
+        assert.deepEqual(await service.status(undefined, root), {
+            projectIdentifier: manifest.projectIdentifier,
+            root,
+            active: null,
+            ready: false,
+        });
+        await service.removeTarget(undefined, "release", root);
+        await service.deleteBuild(undefined, "build_1", root);
+        await service.deleteBuild(undefined, "build_2", root);
+
+        assert.deepEqual(await buildIds(databasePath), []);
+        assert.equal(
+            await service.activeSelection(
+                await service.resolveProject(undefined, root),
+            ),
+            undefined,
+        );
+    });
 });
 
 async function buildIds(databasePath: string): Promise<readonly string[]> {

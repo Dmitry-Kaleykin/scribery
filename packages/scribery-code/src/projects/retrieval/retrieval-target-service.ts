@@ -163,6 +163,21 @@ export class ProjectRetrievalTargetService {
         return selectionResult(project, resolveSelection(updated, project)!);
     }
 
+    async deactivate(
+        reference?: string,
+        currentDirectory = process.cwd(),
+    ): Promise<Readonly<Record<string, unknown>>> {
+        const project = await this.resolveProject(reference, currentDirectory);
+        await this.#catalog.setActive(project.projectIdentifier, {
+            type: "none",
+        });
+        return {
+            projectIdentifier: project.projectIdentifier,
+            ...(project.root === undefined ? {} : { root: project.root }),
+            active: null,
+        };
+    }
+
     async removeTarget(
         reference: string | undefined,
         target: string,
@@ -369,6 +384,7 @@ function resolveSelection(
     manifest: ProjectRetrievalTargets,
     project: IndexedProjectSummary,
 ): ResolvedProjectRetrievalSelection | undefined {
+    if (manifest.active?.type === "none") return undefined;
     if (manifest.active?.type === "target") {
         const activeTarget = manifest.active.target;
         const target = manifest.targets.find(({ name }) => name === activeTarget);

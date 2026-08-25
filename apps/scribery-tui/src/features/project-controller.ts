@@ -210,16 +210,40 @@ export class ProjectController {
         const project = this.#requiredProject();
         const listing = await this.#targets.list(project.projectIdentifier, this.#cwd);
         const targets = Array.isArray(listing.targets) ? listing.targets.filter(isRecord) : [];
-        if (targets.length === 0) {
-            this.#ui.append("This project has no named retrieval targets.", "muted");
+        const active = isRecord(listing.active) ? listing.active : undefined;
+        const selection = await this.#ui.pick("Retrieval targets", [
+            {
+                value: "__deactivate",
+                label: active === undefined
+                    ? "● Retrieval inactive"
+                    : "○ Deactivate retrieval",
+                description: active === undefined
+                    ? "No build is selected"
+                    : "Required before removing the active target or build",
+            },
+            ...targets.map((target) => ({
+                value: String(target.name),
+                label: `${target.active === true ? "●" : "○"} ${String(target.name)}`,
+                description: String(target.indexBuildId ?? ""),
+            })),
+        ]);
+        if (!selection) return;
+        if (selection.value === "__deactivate") {
+            if (active === undefined) {
+                this.#ui.append("Project retrieval is already inactive.", "muted");
+                return;
+            }
+            await this.#targets.deactivate(
+                project.projectIdentifier,
+                this.#cwd,
+            );
+            await this.#refreshProjects(project.projectIdentifier);
+            this.#ui.append(
+                "Deactivated project retrieval. Explicit build inspection remains available.",
+                "success",
+            );
             return;
         }
-        const selection = await this.#ui.pick("Retrieval targets", targets.map((target) => ({
-            value: String(target.name),
-            label: `${target.active === true ? "●" : "○"} ${String(target.name)}`,
-            description: String(target.indexBuildId ?? ""),
-        })));
-        if (!selection) return;
         const action = await this.#ui.pick(selection.label, [
             { value: "switch", label: "Make active" },
             { value: "rename", label: "Rename" },
