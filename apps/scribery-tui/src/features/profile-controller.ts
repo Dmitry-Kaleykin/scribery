@@ -11,6 +11,7 @@ import { formatError } from "../services/error-formatter.js";
 import { ProjectPreferenceStore } from "../services/preference-store.js";
 import { apiKeyOptions, ProviderAccess } from "../services/provider-access.js";
 import type { FeatureUi, ProjectPreferenceContext } from "./contracts.js";
+import { resolveEmbeddingDimensionsInput } from "./embedding-dimensions.js";
 
 export interface ProfileControllerOptions {
     ui: FeatureUi;
@@ -343,9 +344,16 @@ export class ProfileController {
                 "warning",
             );
         }
-        const dimensionsText = await this.#ui.input(title, "Embedding dimensions", String(detectedDimensions));
+        const dimensionsText = await this.#ui.input(
+            title,
+            `Embedding dimensions (auto = ${detectedDimensions})`,
+            "auto",
+        );
         if (dimensionsText === undefined) return undefined;
-        const dimensions = parsePositiveInteger(dimensionsText, "Embedding dimensions");
+        const dimensions = resolveEmbeddingDimensionsInput(
+            dimensionsText,
+            detectedDimensions,
+        );
         const maximumInputsText = await this.#ui.input(
             title,
             "Embedding batch size (empty uses default)",
