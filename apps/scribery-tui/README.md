@@ -9,6 +9,16 @@ advanced `Edit JSON` action. JSON editing uses `$VISUAL`, then `$EDITOR`, then
 before applying it atomically; names remain managed by the separate rename
 action, and profile API keys never appear in the temporary JSON file.
 
+## Internal structure
+
+`src/app.ts` is the composition shell: it creates shared services, connects
+controllers to the terminal UI, dispatches commands, and owns application
+lifecycle. Feature workflows live under `src/features`, manual-operation state
+under `src/operations`, provider and persistence adapters under `src/services`,
+and reusable terminal presentation under `src/ui`. Controllers depend on small
+UI callback interfaces instead of the application class, so a workflow can be
+extended or tested without growing the shell again.
+
 ## Branch-aware live indexing
 
 Create the project's first index with `/index`, then use `/live` (or
