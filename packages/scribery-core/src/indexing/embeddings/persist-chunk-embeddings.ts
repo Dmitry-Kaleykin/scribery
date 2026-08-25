@@ -97,7 +97,14 @@ export async function persistChunkEmbeddings(
     let completedChunks = reused.length;
     let generatedEmbeddings = 0;
     emitProgress(options, completedChunks, prepared.length, reused.length, 0);
-    const groups = [...missingGroups.values()];
+    // Transformer embedding batches are padded to their longest input. Keep
+    // similarly sized chunks together so a large chunk does not make an entire
+    // otherwise-small batch pay for its padding. Result IDs, rather than batch
+    // position, are used below, so this does not change chunk attribution.
+    const groups = [...missingGroups.values()].sort((left, right) =>
+        left.input.text.length - right.input.text.length ||
+        left.input.id.localeCompare(right.input.id)
+    );
 
     for await (const batch of options.embeddingService.embedBatches(
         groups.map(({ input }) => input),

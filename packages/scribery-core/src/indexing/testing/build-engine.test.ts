@@ -8,7 +8,12 @@ import {
 } from "../../chunking/index.js";
 import { DefaultFileClassifier } from "../../classification/index.js";
 import { DefaultDocumentDecoder } from "../../decoding/index.js";
-import { DeterministicFakeEmbeddingProvider } from "../../embeddings/index.js";
+import {
+    DeterministicFakeEmbeddingProvider,
+    type EmbeddingInput,
+    type EmbeddingProvider,
+    type EmbeddingResult,
+} from "../../embeddings/index.js";
 import {
     createRepositoryId,
     hashBytes,
@@ -80,6 +85,34 @@ describe("IndexBuildEngine", () => {
 
         assert.equal(result.indexedDocuments, 1);
         assert.ok(result.indexedChunks > 1);
+    });
+
+    it("buckets pending embedding inputs by length across provider batches", async () => {
+        const provider = new RecordingEmbeddingProvider();
+        const fixtures = [
+            ["long.txt", "l".repeat(1_600)],
+            ["tiny.txt", "t".repeat(40)],
+            ["medium.txt", "m".repeat(800)],
+            ["short.txt", "s".repeat(200)],
+        ] as const;
+
+        await new IndexBuildEngine(
+            new InMemoryStorageProvider(),
+            provider,
+            createTestRuntime(),
+        ).build({
+            source: snapshotDocuments(fixtures),
+            plan: {
+                policy: slidingWindowPolicy,
+                policyIdentity: "text-and-code:test",
+                strategies: ["sliding-window"],
+                maximumChunkSize: 2_000,
+            },
+        });
+
+        assert.deepEqual(provider.batchSizes, [2, 2]);
+        const lengths = provider.inputLengths.flat();
+        assert.deepEqual(lengths, [...lengths].sort((left, right) => left - right));
     });
 
     it("indexes project Markdown with an injected cAST runtime", async () => {
@@ -200,4 +233,56 @@ function snapshot(
         }],
         diagnostics: [],
     };
+}
+
+function snapshotDocuments(
+    fixtures: readonly (readonly [path: string, content: string])[],
+): PreparedSourceSnapshot {
+    const documents = fixtures.map(([path, content]) => {
+        const bytes = new TextEncoder().encode(content);
+        const byteContentHash = hashBytes(bytes);
+
+        return {
+            path,
+            bytes,
+            byteContentHash,
+            revisionIdentity: byteContentHash,
+        };
+    });
+    const identity = hashText(documents.map(({ path, byteContentHash }) =>
+        `${path}:${byteContentHash}`
+    ).join("\n"));
+
+    return {
+        scopeId: createRepositoryId("in-memory-fixtures"),
+        rootIdentity: ".",
+        sourceIdentity: `memory:${identity}`,
+        sourceSelectionHash: identity,
+        provenance: { kind: "directory", root: "/virtual" },
+        documents,
+        diagnostics: [],
+    };
+}
+
+class RecordingEmbeddingProvider implements EmbeddingProvider {
+    readonly identity = {
+        provider: "recording",
+        model: "recording-v1",
+        dimensions: 2,
+        metric: "cosine" as const,
+    };
+    readonly maximumInputs = 2;
+    readonly maximumCharacters = 1_000_000;
+    readonly batchSizes: number[] = [];
+    readonly inputLengths: number[][] = [];
+
+    async embed(inputs: readonly EmbeddingInput[]): Promise<readonly EmbeddingResult[]> {
+        this.batchSizes.push(inputs.length);
+        this.inputLengths.push(inputs.map(({ text }) => text.length));
+
+        return inputs.map(({ id }) => ({
+            id,
+            vector: Float32Array.of(1, 0),
+        }));
+    }
 }

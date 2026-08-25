@@ -109,8 +109,33 @@ describe("embeddings", () => {
         assert.deepEqual(requestBody, {
             model: "embedding-model",
             input: ["one", "two"],
+            encoding_format: "base64",
         });
         assert.deepEqual(results.map(({ id }) => id), ["first", "second"]);
+    });
+
+    it("decodes OpenAI-compatible base64 float32 embeddings", async () => {
+        const expected = Float32Array.of(0.25, -0.5, 1);
+        const provider = new LmStudioEmbeddingProvider({
+            model: "embedding-model",
+            dimensions: expected.length,
+            fetch: async () => new Response(JSON.stringify({
+                data: [{
+                    index: 0,
+                    embedding: Buffer.from(
+                        expected.buffer,
+                        expected.byteOffset,
+                        expected.byteLength,
+                    ).toString("base64"),
+                }],
+            })),
+        });
+
+        const [result] = await new EmbeddingService(provider).embed([
+            { id: "first", text: "one", mode: "document" },
+        ]);
+
+        assert.deepEqual(result?.vector, expected);
     });
 
     it("applies an embedding suffix after document and query content", () => {

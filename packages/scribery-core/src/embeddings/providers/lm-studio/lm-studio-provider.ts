@@ -109,6 +109,10 @@ export class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
                 body: JSON.stringify({
                     model: this.identity.model,
                     input: inputs.map(({ text }) => text),
+                    // The OpenAI-compatible base64 representation carries raw
+                    // float32 values instead of verbose decimal JSON. Providers
+                    // that ignore this and return float arrays remain supported.
+                    encoding_format: "base64",
                 }),
                 signal: combinedSignal,
             });
@@ -141,15 +145,14 @@ export class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
 
                 if (
                     input === undefined ||
-                    !Array.isArray(item.embedding) ||
-                    item.embedding.some((value) => typeof value !== "number")
+                    !isEmbeddingPayload(item.embedding)
                 ) {
                     throw invalidResponse();
                 }
 
                 return {
                     id: input.id,
-                    vector: Float32Array.from(item.embedding as number[]),
+                    vector: decodeEmbedding(item.embedding),
                 };
             });
         } catch (error: unknown) {
@@ -176,6 +179,38 @@ export class OpenAiCompatibleEmbeddingProvider implements EmbeddingProvider {
             clearTimeout(timeout);
         }
     }
+}
+
+function isEmbeddingPayload(value: unknown): value is number[] | string {
+    return typeof value === "string" ||
+        (Array.isArray(value) &&
+            value.every((item) => typeof item === "number"));
+}
+
+function decodeEmbedding(payload: number[] | string): Float32Array {
+    if (Array.isArray(payload)) {
+        return Float32Array.from(payload);
+    }
+
+    const bytes = Buffer.from(payload, "base64");
+
+    if (bytes.byteLength === 0 || bytes.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
+        throw invalidResponse();
+    }
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const vector = new Float32Array(
+        bytes.byteLength / Float32Array.BYTES_PER_ELEMENT,
+    );
+
+    for (let index = 0; index < vector.length; index += 1) {
+        vector[index] = view.getFloat32(
+            index * Float32Array.BYTES_PER_ELEMENT,
+            true,
+        );
+    }
+
+    return vector;
 }
 
 function invalidResponse(): EmbeddingError {
