@@ -69,10 +69,14 @@ When an oversized node is replaced by its children, cAST assigns the complete
 parent range to contiguous child envelopes. Prefixes, suffixes, comments,
 punctuation, and whitespace between AST nodes therefore belong to exactly one
 chunk. Concatenating `chunk.content` always reconstructs the decoded document
-verbatim. A leaf with no smaller AST boundary remains one explicitly oversized
-chunk; cAST does not silently switch to fixed-size, line-based, or sliding-window
-splitting. A chunk representing one node records that node type as `kind`; a
-chunk formed by merging multiple siblings leaves `kind` unset.
+verbatim. A leaf with no smaller AST boundary uses a deterministic bounded
+fallback. It prefers blank lines, line endings, statement separators, commas,
+and whitespace, then makes a hard source cut when no readable boundary exists.
+The fallback is non-overlapping, preserves exact source coverage and node kind,
+and never changes the strategy identity from `cast`. This prevents giant
+literals, generated data, or minified expressions from exceeding embedding
+provider limits. A chunk representing one node records that node type as `kind`;
+a chunk formed by merging multiple siblings leaves `kind` unset.
 
 Some syntax trees expose whitespace-only children at the boundary of an
 oversized parent. Their contiguous envelopes can otherwise become isolated

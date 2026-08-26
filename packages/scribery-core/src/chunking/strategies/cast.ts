@@ -122,7 +122,7 @@ function splitAndMerge(
 
         const size = task.endOffset - task.startOffset;
 
-        if (size <= maximumSize || task.node.children.length === 0) {
+        if (size <= maximumSize) {
             const boundaryAffinity = boundaryAffinityFor(
                 task.node,
                 task.startOffset,
@@ -137,6 +137,34 @@ function splitAndMerge(
                     ? {}
                     : { boundaryAffinity }),
             });
+            continue;
+        }
+
+        if (task.node.children.length === 0) {
+            const boundaryAffinity = boundaryAffinityFor(
+                task.node,
+                task.startOffset,
+                task.endOffset,
+                content,
+            );
+
+            if (boundaryAffinity !== undefined) {
+                fragments.push({
+                    startOffset: task.startOffset,
+                    endOffset: task.endOffset,
+                    kind: task.node.type,
+                    boundaryAffinity,
+                });
+                continue;
+            }
+
+            fragments.push(...splitOversizedLeaf(
+                task,
+                content,
+                maximumSize,
+                path,
+                signal,
+            ));
             continue;
         }
 
@@ -179,6 +207,83 @@ function splitAndMerge(
         path,
         signal,
     );
+}
+
+function splitOversizedLeaf(
+    task: SplitNodeTask,
+    content: string,
+    maximumSize: number,
+    path: string,
+    signal?: AbortSignal,
+): readonly SourceFragment[] {
+    const fragments: SourceFragment[] = [];
+    let startOffset = task.startOffset;
+
+    while (startOffset < task.endOffset) {
+        throwIfChunkingAborted(signal, path);
+        const maximumEndOffset = Math.min(
+            task.endOffset,
+            startOffset + maximumSize,
+        );
+        const preferred = maximumEndOffset === task.endOffset
+            ? maximumEndOffset
+            : preferredLeafBoundary(content, startOffset, maximumEndOffset);
+        const endOffset = preferred > startOffset
+            ? preferred
+            : validBoundaryAtOrAfter(content, maximumEndOffset);
+        const boundedEndOffset = Math.min(endOffset, task.endOffset);
+
+        fragments.push({
+            startOffset,
+            endOffset: boundedEndOffset,
+            kind: task.node.type,
+        });
+        startOffset = boundedEndOffset;
+    }
+
+    return fragments;
+}
+
+function preferredLeafBoundary(
+    content: string,
+    startOffset: number,
+    maximumEndOffset: number,
+): number {
+    const minimumEndOffset = startOffset + Math.floor(
+        (maximumEndOffset - startOffset) / 2,
+    );
+
+    for (const delimiter of ["\n\n", "\n", ";", ",", "\t", " "]) {
+        const found = content.lastIndexOf(
+            delimiter,
+            maximumEndOffset - delimiter.length,
+        );
+
+        if (found >= minimumEndOffset) {
+            return validBoundaryAtOrBefore(
+                content,
+                found + delimiter.length,
+            );
+        }
+    }
+
+    return validBoundaryAtOrBefore(content, maximumEndOffset);
+}
+
+function validBoundaryAtOrBefore(content: string, offset: number): number {
+    return isInsideSurrogatePair(content, offset) ? offset - 1 : offset;
+}
+
+function validBoundaryAtOrAfter(content: string, offset: number): number {
+    return isInsideSurrogatePair(content, offset) ? offset + 1 : offset;
+}
+
+function isInsideSurrogatePair(content: string, offset: number): boolean {
+    const previous = content.charCodeAt(offset - 1);
+    const next = content.charCodeAt(offset);
+
+    return previous >= 0xd800 && previous <= 0xdbff &&
+        next >= 0xdc00 && next <= 0xdfff;
 }
 
 function createChildTasks(

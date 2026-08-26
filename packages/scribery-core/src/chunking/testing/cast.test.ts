@@ -241,7 +241,7 @@ describe("CastChunkingStrategy", () => {
         }
     });
 
-    it("keeps an oversized leaf intact when no smaller AST boundary exists", async () => {
+    it("falls back to bounded source splits for an oversized AST leaf", async () => {
         const sourceDocument = document({ content: "indivisible!" });
         const parser = fakeParserFor((sourcePositions, currentDocument) =>
             syntaxNode(
@@ -255,14 +255,41 @@ describe("CastChunkingStrategy", () => {
             new ParserRegistry([parser]),
         ).chunk(sourceDocument, options(4));
 
-        assert.equal(chunks.length, 1);
-        assert.equal(chunks[0]?.content, sourceDocument.content);
-        assert.equal(chunks[0]?.kind, "Literal");
-        assert.ok((chunks[0]?.content.length ?? 0) > 4);
+        assert.deepEqual(
+            chunks.map(({ content, kind }) => ({ content, kind })),
+            [
+                { content: "indi", kind: "Literal" },
+                { content: "visi", kind: "Literal" },
+                { content: "ble!", kind: "Literal" },
+            ],
+        );
+        assert.ok(chunks.every(({ content }) => content.length <= 4));
         assertExactCoverage(sourceDocument, chunks);
     });
 
-    it("compacts structural boundary residue into adjacent semantic chunks", async () => {
+    it("prefers readable delimiters when splitting an oversized AST leaf", async () => {
+        const sourceDocument = document({ content: "alpha;beta;gamma;" });
+        const parser = fakeParserFor((sourcePositions, currentDocument) =>
+            syntaxNode(
+                sourcePositions,
+                "Literal",
+                0,
+                currentDocument.content.length,
+            ),
+        );
+        const chunks = await new CastChunkingStrategy(
+            new ParserRegistry([parser]),
+        ).chunk(sourceDocument, options(7));
+
+        assert.deepEqual(
+            chunks.map(({ content }) => content),
+            ["alpha;", "beta;", "gamma;"],
+        );
+        assert.ok(chunks.every(({ content }) => content.length <= 7));
+        assertExactCoverage(sourceDocument, chunks);
+    });
+
+    it("keeps structural residue out of forced semantic leaf splits", async () => {
         const sourceDocument = document({
             content: "<wrapper>\nABCDEFGHIJKLMNO\n</wrapper>",
         });
@@ -301,17 +328,21 @@ describe("CastChunkingStrategy", () => {
             new ParserRegistry([parser]),
         ).chunk(sourceDocument, options(10));
 
-        assert.deepEqual(chunks, [{
-            content: sourceDocument.content,
-            range: {
-                startOffset: 0,
-                endOffset: sourceDocument.content.length,
-                startLine: 1,
-                endLine: 3,
-            },
-            strategy: "cast",
-            kind: "Body",
-        }]);
+        assert.deepEqual(
+            chunks.map(({ content, searchable }) => ({
+                content,
+                ...(searchable === undefined ? {} : { searchable }),
+            })),
+            [
+                { content: "<wrapper>\n", searchable: false },
+                { content: "ABCDEFGHIJ" },
+                { content: "KLMNO" },
+                { content: "\n</wrapper>", searchable: false },
+            ],
+        );
+        assert.ok(chunks
+            .filter(({ searchable }) => searchable !== false)
+            .every(({ content }) => content.length <= 10));
         assertExactCoverage(sourceDocument, chunks);
     });
 

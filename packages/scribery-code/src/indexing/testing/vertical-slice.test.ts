@@ -198,8 +198,11 @@ describe("indexing vertical slice", () => {
         });
         assert.equal(incompatible.reusedDocuments, 0);
         assert.equal(incompatible.reusedChunks, 0);
-        assert.equal(incompatible.reusedEmbeddings, incompatible.indexedChunks);
-        assert.equal(incompatible.generatedEmbeddings, 0);
+        assert.equal(
+            incompatible.reusedEmbeddings + incompatible.generatedEmbeddings,
+            incompatible.indexedChunks,
+        );
+        assert.ok(incompatible.reusedEmbeddings > 0);
         assert.equal(
             provider.documentInputs - documentInputsBeforeIncompatibleBuild,
             incompatible.generatedEmbeddings,

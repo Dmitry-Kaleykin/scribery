@@ -135,8 +135,12 @@ describe("project format parsers", () => {
             chunks.map(({ content }) => content).join(""),
             document.content,
         );
-        assert.ok(chunks.every(({ searchable }) => searchable !== false));
-        assert.ok(chunks.every(({ content }) =>
+        const searchableChunks = chunks.filter(
+            ({ searchable }) => searchable !== false,
+        );
+
+        assert.ok(searchableChunks.every(({ content }) => content.length <= 80));
+        assert.ok(searchableChunks.every(({ content }) =>
             ![
                 "<template>",
                 "</template>",
@@ -146,8 +150,10 @@ describe("project format parsers", () => {
                 "</style>",
             ].includes(content.trim())
         ));
-        assert.ok(chunks[0]?.content.startsWith("<template>\n"));
-        assert.ok(chunks[0]?.content.includes("<main>"));
+        assert.ok(searchableChunks[0]?.content.startsWith("<main>"));
+        assert.ok(chunks.some(({ content, searchable }) =>
+            searchable === false && content.includes("<template>")
+        ));
         assert.ok(chunks.some(({ content }) =>
             content.includes("</template>")
         ));
