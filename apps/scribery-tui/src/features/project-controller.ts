@@ -295,7 +295,7 @@ export class ProjectController {
                     project.root ?? project.projectIdentifier,
                     ...(profile ? ["--profile", profile] : []),
                     "--tools",
-                    "vector_search",
+                    "search_codebase",
                 ],
             },
         }, null, 2);
