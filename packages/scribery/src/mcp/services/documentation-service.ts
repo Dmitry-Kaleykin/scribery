@@ -1,8 +1,8 @@
 import {
-    CollectionCatalog,
-    CollectionService,
-    collectionDatabasePath,
-    type CollectionManifest,
+    DocumentationCatalog,
+    DocumentationService,
+    documentationDatabasePath,
+    type DocumentationManifest,
 } from "scribery-documents";
 import {
     createOpenAiCompatibleRerankingProvider,
@@ -14,30 +14,30 @@ import {
 } from "scribery-core";
 import { MCP_DEFAULT_RESULT_LIMIT } from "../constants/defaults.js";
 import type {
-    CollectionSearchInput,
+    DocumentationSearchInput,
     ScriberyMcpServerOptions,
 } from "../contracts/server.js";
 
-export class McpCollectionService {
-    readonly #catalog: CollectionCatalog;
+export class McpDocumentationService {
+    readonly #catalog: DocumentationCatalog;
     readonly #options: ScriberyMcpServerOptions;
 
     constructor(options: ScriberyMcpServerOptions) {
         this.#options = options;
-        this.#catalog = new CollectionCatalog(options.collectionsDirectory);
+        this.#catalog = new DocumentationCatalog(options.documentationsDirectory);
     }
 
-    async listCollections(): Promise<Readonly<Record<string, unknown>>> {
-        const collections = await this.#catalog.list();
-        return { count: collections.length, collections };
+    async listDocumentations(): Promise<Readonly<Record<string, unknown>>> {
+        const documentations = await this.#catalog.list();
+        return { count: documentations.length, documentations };
     }
 
     async listSources(
-        collectionReference?: string,
+        documentationReference: string,
     ): Promise<Readonly<Record<string, unknown>>> {
-        const manifest = await this.#resolveManifest(collectionReference);
+        const manifest = await this.#resolveManifest(documentationReference);
         return {
-            collectionId: manifest.collectionId,
+            documentationId: manifest.documentationId,
             name: manifest.name,
             sourceCount: manifest.sources.length,
             sourcesRevision: manifest.sourcesRevision,
@@ -47,23 +47,23 @@ export class McpCollectionService {
     }
 
     async search(
-        input: CollectionSearchInput,
+        input: DocumentationSearchInput,
         signal?: AbortSignal,
     ): Promise<Readonly<Record<string, unknown>>> {
-        const manifest = await this.#resolveManifest(input.collectionReference);
+        const manifest = await this.#resolveManifest(input.documentationReference);
 
         if (
             manifest.activeBuild === undefined ||
             manifest.builtSourcesRevision !== manifest.sourcesRevision
         ) {
             throw new Error(
-                `Collection ${manifest.name} must be built after its latest source changes`,
+                `Documentation ${manifest.name} must be built after its latest source changes`,
             );
         }
 
-        const databasePath = collectionDatabasePath(
+        const databasePath = documentationDatabasePath(
             this.#catalog.baseDirectory,
-            manifest.collectionId,
+            manifest.documentationId,
         );
         const storage = new SqliteStorageProvider(databasePath, {
             readOnly: true,
@@ -98,14 +98,14 @@ export class McpCollectionService {
         const rerankingProvider = rerankingRequested
             ? this.#createRerankingProvider()
             : undefined;
-        const service = new CollectionService({
+        const service = new DocumentationService({
             embeddingProvider,
             ...(rerankingProvider === undefined ? {} : { rerankingProvider }),
-            ...(this.#options.collectionsDirectory === undefined
+            ...(this.#options.documentationsDirectory === undefined
                 ? {}
-                : { collectionsDirectory: this.#options.collectionsDirectory }),
+                : { documentationsDirectory: this.#options.documentationsDirectory }),
         });
-        const results = await service.retrieve(manifest.collectionId, {
+        const results = await service.retrieve(manifest.documentationId, {
             query: input.query,
             limit: input.limit ?? MCP_DEFAULT_RESULT_LIMIT,
             ...(input.sourceIds === undefined && input.tags === undefined
@@ -146,7 +146,7 @@ export class McpCollectionService {
         });
 
         return {
-            collectionId: manifest.collectionId,
+            documentationId: manifest.documentationId,
             name: manifest.name,
             indexBuildId: build.indexBuildId,
             resultCount: results.length,
@@ -155,26 +155,9 @@ export class McpCollectionService {
     }
 
     async #resolveManifest(
-        requestedReference: string | undefined,
-    ): Promise<CollectionManifest> {
-        const reference = requestedReference ??
-            this.#options.defaultCollectionReference;
-
-        if (reference !== undefined) {
-            return this.#catalog.resolve(reference);
-        }
-
-        const collections = await this.#catalog.list();
-        if (collections.length === 1) {
-            return this.#catalog.resolve(collections[0]!.collectionId);
-        }
-        if (collections.length === 0) {
-            throw new Error("No managed collections are available");
-        }
-
-        throw new Error(
-            "Multiple collections are available; configure --collection or provide collection",
-        );
+        requestedReference: string,
+    ): Promise<DocumentationManifest> {
+        return this.#catalog.resolve(requestedReference);
     }
 
     #providerOptions(): { baseUrl?: string; apiKey?: string } {

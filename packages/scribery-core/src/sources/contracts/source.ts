@@ -37,8 +37,8 @@ export type SourceProvenance =
         dirty: boolean;
     }
     | {
-        kind: "managed-collection";
-        collectionId: string;
+        kind: "managed-documentation";
+        documentationId: string;
     };
 
 export interface PreparedSourceSnapshot {

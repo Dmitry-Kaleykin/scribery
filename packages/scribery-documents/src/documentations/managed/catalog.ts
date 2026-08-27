@@ -2,53 +2,53 @@ import { mkdir, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs
 import { basename, dirname } from "node:path";
 
 import {
-    createCollectionId,
+    createDocumentationId,
     createSourceId,
     hashBytes,
     normalizeRelativePath,
 } from "scribery-core";
-import { COLLECTION_MANIFEST_VERSION } from "../constants/storage.js";
+import { DOCUMENTATION_MANIFEST_VERSION } from "../constants/storage.js";
 import type {
-    CollectionDocumentInput,
-    CollectionManifest,
-    CollectionSource,
-    CollectionSummary,
-    DeletedCollection,
+    DocumentationInput,
+    DocumentationManifest,
+    DocumentationSource,
+    DocumentationSummary,
+    DeletedDocumentation,
     SourceTagMutation,
-} from "../contracts/collection.js";
-import { CollectionError } from "../errors/collection-error.js";
+} from "../contracts/documentation.js";
+import { DocumentationError } from "../errors/documentation-error.js";
 import {
-    collectionDatabasePath,
-    collectionDirectory,
-    collectionManifestPath,
-    collectionSourcePath,
-    managedCollectionsDirectory,
-    validateCollectionId,
+    documentationDatabasePath,
+    documentationDirectory,
+    documentationManifestPath,
+    documentationSourcePath,
+    managedDocumentationsDirectory,
+    validateDocumentationId,
 } from "./paths.js";
 
-export class CollectionCatalog {
+export class DocumentationCatalog {
     readonly baseDirectory: string;
 
-    constructor(baseDirectory = managedCollectionsDirectory()) {
+    constructor(baseDirectory = managedDocumentationsDirectory()) {
         this.baseDirectory = baseDirectory;
     }
 
-    async create(name: string): Promise<CollectionManifest> {
-        const normalizedName = normalizeCollectionName(name);
-        const collectionId = createCollectionId(normalizedName.toLowerCase());
+    async create(name: string): Promise<DocumentationManifest> {
+        const normalizedName = normalizeDocumentationName(name);
+        const documentationId = createDocumentationId(normalizedName.toLowerCase());
 
-        if (await this.#readById(collectionId) !== undefined) {
-            throw new CollectionError(
-                "collection-exists",
-                `Collection ${normalizedName} already exists`,
-                { collectionId },
+        if (await this.#readById(documentationId) !== undefined) {
+            throw new DocumentationError(
+                "documentation-exists",
+                `Documentation ${normalizedName} already exists`,
+                { documentationId },
             );
         }
 
         const now = new Date().toISOString();
-        const manifest: CollectionManifest = {
-            schemaVersion: COLLECTION_MANIFEST_VERSION,
-            collectionId,
+        const manifest: DocumentationManifest = {
+            schemaVersion: DOCUMENTATION_MANIFEST_VERSION,
+            documentationId,
             name: normalizedName,
             createdAt: now,
             updatedAt: now,
@@ -59,9 +59,9 @@ export class CollectionCatalog {
         return manifest;
     }
 
-    async resolve(reference: string): Promise<CollectionManifest> {
+    async resolve(reference: string): Promise<DocumentationManifest> {
         const trimmed = reference.trim();
-        const direct = trimmed.startsWith("collection_")
+        const direct = trimmed.startsWith("documentation_")
             ? await this.#readById(trimmed)
             : undefined;
 
@@ -72,25 +72,25 @@ export class CollectionCatalog {
         );
 
         if (matches.length !== 1) {
-            throw new CollectionError(
-                "collection-not-found",
-                `Collection ${reference} was not found`,
+            throw new DocumentationError(
+                "documentation-not-found",
+                `Documentation ${reference} was not found`,
                 { reference },
             );
         }
 
-        return this.#readById(matches[0]!.collectionId).then((manifest) => {
+        return this.#readById(matches[0]!.documentationId).then((manifest) => {
             if (manifest === undefined) {
-                throw new CollectionError(
-                    "collection-not-found",
-                    `Collection ${reference} was not found`,
+                throw new DocumentationError(
+                    "documentation-not-found",
+                    `Documentation ${reference} was not found`,
                 );
             }
             return manifest;
         });
     }
 
-    async list(): Promise<readonly CollectionSummary[]> {
+    async list(): Promise<readonly DocumentationSummary[]> {
         let entries: string[];
 
         try {
@@ -100,7 +100,7 @@ export class CollectionCatalog {
             throw error;
         }
 
-        const summaries: CollectionSummary[] = [];
+        const summaries: DocumentationSummary[] = [];
 
         for (const entry of entries.sort()) {
             const manifest = await this.#readById(entry);
@@ -111,28 +111,28 @@ export class CollectionCatalog {
         return summaries.sort((left, right) => left.name.localeCompare(right.name));
     }
 
-    async delete(reference: string): Promise<DeletedCollection> {
+    async delete(reference: string): Promise<DeletedDocumentation> {
         const manifest = await this.resolve(reference);
-        const databasePath = collectionDatabasePath(
+        const databasePath = documentationDatabasePath(
             this.baseDirectory,
-            manifest.collectionId,
+            manifest.documentationId,
         );
 
         try {
-            await rm(collectionDirectory(this.baseDirectory, manifest.collectionId), {
+            await rm(documentationDirectory(this.baseDirectory, manifest.documentationId), {
                 recursive: true,
             });
         } catch (error: unknown) {
-            throw new CollectionError(
-                "collection-storage-failure",
-                `Collection ${manifest.name} could not be deleted`,
-                { collectionId: manifest.collectionId },
+            throw new DocumentationError(
+                "documentation-storage-failure",
+                `Documentation ${manifest.name} could not be deleted`,
+                { documentationId: manifest.documentationId },
                 error,
             );
         }
 
         return {
-            collectionId: manifest.collectionId,
+            documentationId: manifest.documentationId,
             name: manifest.name,
             databasePath,
         };
@@ -140,12 +140,12 @@ export class CollectionCatalog {
 
     async upsertDocuments(
         reference: string,
-        inputs: readonly CollectionDocumentInput[],
-    ): Promise<CollectionManifest> {
+        inputs: readonly DocumentationInput[],
+    ): Promise<DocumentationManifest> {
         if (inputs.length === 0) {
-            throw new CollectionError(
-                "invalid-collection",
-                "At least one collection document is required",
+            throw new DocumentationError(
+                "invalid-documentation",
+                "At least one document is required",
             );
         }
 
@@ -156,7 +156,7 @@ export class CollectionCatalog {
 
         for (const input of inputs) {
             const externalId = requiredText(input.externalId, "externalId");
-            const sourceId = createSourceId(manifest.collectionId, externalId);
+            const sourceId = createSourceId(manifest.documentationId, externalId);
             const previous = sources.get(sourceId);
             const title = input.title?.trim() || previous?.title || basename(externalId);
             const logicalPath = normalizeRelativePath(
@@ -166,7 +166,7 @@ export class CollectionCatalog {
             const conflictingSourceId = paths.get(logicalPath);
 
             if (conflictingSourceId !== undefined && conflictingSourceId !== sourceId) {
-                throw new CollectionError(
+                throw new DocumentationError(
                     "source-conflict",
                     `Logical path ${logicalPath} belongs to another source`,
                     { logicalPath, conflictingSourceId },
@@ -181,7 +181,7 @@ export class CollectionCatalog {
             const attributes = normalizeAttributes(
                 input.attributes ?? previous?.attributes ?? {},
             );
-            const source: CollectionSource = {
+            const source: DocumentationSource = {
                 sourceId,
                 externalId,
                 logicalPath,
@@ -205,9 +205,9 @@ export class CollectionCatalog {
                 createdAt: previous?.createdAt ?? now,
                 updatedAt: now,
             };
-            const contentPath = collectionSourcePath(
+            const contentPath = documentationSourcePath(
                 this.baseDirectory,
-                manifest.collectionId,
+                manifest.documentationId,
                 contentFilename,
             );
             await mkdir(dirname(contentPath), { recursive: true });
@@ -219,7 +219,7 @@ export class CollectionCatalog {
             sources.set(sourceId, source);
         }
 
-        const updated: CollectionManifest = {
+        const updated: DocumentationManifest = {
             ...manifest,
             updatedAt: now,
             sourcesRevision: manifest.sourcesRevision + 1,
@@ -234,21 +234,21 @@ export class CollectionCatalog {
     async removeSources(
         reference: string,
         sourceIds: readonly string[],
-    ): Promise<CollectionManifest> {
+    ): Promise<DocumentationManifest> {
         const manifest = await this.resolve(reference);
         const requested = new Set(sourceIds.map((id) => requiredText(id, "sourceId")));
         const found = manifest.sources.filter(({ sourceId }) => requested.has(sourceId));
 
         if (found.length !== requested.size) {
             const foundIds = new Set(found.map(({ sourceId }) => sourceId));
-            throw new CollectionError(
+            throw new DocumentationError(
                 "source-not-found",
-                "One or more collection sources were not found",
+                "One or more documentation sources were not found",
                 { sourceIds: [...requested].filter((id) => !foundIds.has(id)) },
             );
         }
 
-        const updated: CollectionManifest = {
+        const updated: DocumentationManifest = {
             ...manifest,
             updatedAt: new Date().toISOString(),
             sourcesRevision: manifest.sourcesRevision + 1,
@@ -257,9 +257,9 @@ export class CollectionCatalog {
         await this.write(updated);
 
         for (const source of found) {
-            await unlink(collectionSourcePath(
+            await unlink(documentationSourcePath(
                 this.baseDirectory,
-                manifest.collectionId,
+                manifest.documentationId,
                 source.contentFilename,
             )).catch((error: unknown) => {
                 if (!isMissing(error)) throw error;
@@ -274,10 +274,10 @@ export class CollectionCatalog {
         sourceIds: readonly string[],
         mutation: SourceTagMutation,
         tags: readonly string[] = [],
-    ): Promise<CollectionManifest> {
+    ): Promise<DocumentationManifest> {
         if (sourceIds.length === 0) {
-            throw new CollectionError(
-                "invalid-collection",
+            throw new DocumentationError(
+                "invalid-documentation",
                 "At least one source identifier is required",
             );
         }
@@ -288,24 +288,24 @@ export class CollectionCatalog {
 
         if (found.length !== requested.size) {
             const foundIds = new Set(found.map(({ sourceId }) => sourceId));
-            throw new CollectionError(
+            throw new DocumentationError(
                 "source-not-found",
-                "One or more collection sources were not found",
+                "One or more documentation sources were not found",
                 { sourceIds: [...requested].filter((id) => !foundIds.has(id)) },
             );
         }
 
         if (mutation === "clear" && tags.length > 0) {
-            throw new CollectionError(
-                "invalid-collection",
+            throw new DocumentationError(
+                "invalid-documentation",
                 "Source tag clear does not accept tags",
             );
         }
 
         const normalizedTags = normalizeTags(tags);
         if (mutation !== "clear" && normalizedTags.length === 0) {
-            throw new CollectionError(
-                "invalid-collection",
+            throw new DocumentationError(
+                "invalid-documentation",
                 `Source tag ${mutation} requires at least one tag`,
             );
         }
@@ -323,7 +323,7 @@ export class CollectionCatalog {
 
         if (!changed) return manifest;
 
-        const updated: CollectionManifest = {
+        const updated: DocumentationManifest = {
             ...manifest,
             updatedAt: now,
             sourcesRevision: manifest.sourcesRevision + 1,
@@ -334,41 +334,41 @@ export class CollectionCatalog {
     }
 
     async readSourceContent(
-        manifest: CollectionManifest,
-        source: CollectionSource,
+        manifest: DocumentationManifest,
+        source: DocumentationSource,
     ): Promise<Uint8Array> {
-        return readFile(collectionSourcePath(
+        return readFile(documentationSourcePath(
             this.baseDirectory,
-            manifest.collectionId,
+            manifest.documentationId,
             source.contentFilename,
         ));
     }
 
-    async write(manifest: CollectionManifest): Promise<void> {
-        const path = collectionManifestPath(this.baseDirectory, manifest.collectionId);
+    async write(manifest: DocumentationManifest): Promise<void> {
+        const path = documentationManifestPath(this.baseDirectory, manifest.documentationId);
         const temporaryPath = `${path}.tmp`;
         await mkdir(dirname(path), { recursive: true });
         await writeFile(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
         await rename(temporaryPath, path);
     }
 
-    async #readById(collectionId: string): Promise<CollectionManifest | undefined> {
+    async #readById(documentationId: string): Promise<DocumentationManifest | undefined> {
         try {
-            validateCollectionId(collectionId);
+            validateDocumentationId(documentationId);
         } catch {
             return undefined;
         }
 
         try {
             const parsed = JSON.parse(await readFile(
-                collectionManifestPath(this.baseDirectory, collectionId),
+                documentationManifestPath(this.baseDirectory, documentationId),
                 "utf8",
-            )) as CollectionManifest;
+            )) as DocumentationManifest;
             if (!isManifest(parsed)) {
-                throw new CollectionError(
-                    "collection-storage-failure",
-                    `Collection manifest ${collectionId} is invalid`,
-                    { collectionId },
+                throw new DocumentationError(
+                    "documentation-storage-failure",
+                    `Documentation manifest ${documentationId} is invalid`,
+                    { documentationId },
                 );
             }
             return {
@@ -380,11 +380,11 @@ export class CollectionCatalog {
             };
         } catch (error: unknown) {
             if (isMissing(error)) return undefined;
-            if (error instanceof CollectionError) throw error;
-            throw new CollectionError(
-                "collection-storage-failure",
-                `Collection manifest ${collectionId} could not be read`,
-                { collectionId },
+            if (error instanceof DocumentationError) throw error;
+            throw new DocumentationError(
+                "documentation-storage-failure",
+                `Documentation manifest ${documentationId} could not be read`,
+                { documentationId },
                 error,
             );
         }
@@ -392,11 +392,11 @@ export class CollectionCatalog {
 }
 
 function summaryFrom(
-    manifest: CollectionManifest,
+    manifest: DocumentationManifest,
     baseDirectory: string,
-): CollectionSummary {
+): DocumentationSummary {
     return {
-        collectionId: manifest.collectionId,
+        documentationId: manifest.documentationId,
         name: manifest.name,
         sourceCount: manifest.sources.length,
         sourcesRevision: manifest.sourcesRevision,
@@ -404,23 +404,23 @@ function summaryFrom(
             ? {}
             : { builtSourcesRevision: manifest.builtSourcesRevision }),
         needsBuild: manifest.builtSourcesRevision !== manifest.sourcesRevision,
-        databasePath: collectionDatabasePath(baseDirectory, manifest.collectionId),
+        databasePath: documentationDatabasePath(baseDirectory, manifest.documentationId),
         ...(manifest.activeBuild === undefined ? {} : { activeBuild: manifest.activeBuild }),
     };
 }
 
-function isManifest(value: CollectionManifest): boolean {
-    return value?.schemaVersion === COLLECTION_MANIFEST_VERSION &&
-        typeof value.collectionId === "string" &&
+function isManifest(value: DocumentationManifest): boolean {
+    return value?.schemaVersion === DOCUMENTATION_MANIFEST_VERSION &&
+        typeof value.documentationId === "string" &&
         typeof value.name === "string" &&
         Number.isSafeInteger(value.sourcesRevision) &&
         Array.isArray(value.sources);
 }
 
-function normalizeCollectionName(name: string): string {
-    const normalized = requiredText(name, "collection name");
+function normalizeDocumentationName(name: string): string {
+    const normalized = requiredText(name, "documentation name");
     if (normalized.length > 100) {
-        throw new CollectionError("invalid-collection", "Collection name is too long");
+        throw new DocumentationError("invalid-documentation", "Documentation name is too long");
     }
     return normalized;
 }
@@ -428,7 +428,7 @@ function normalizeCollectionName(name: string): string {
 function requiredText(value: string, field: string): string {
     const trimmed = value.trim();
     if (trimmed.length === 0) {
-        throw new CollectionError("invalid-collection", `${field} is required`);
+        throw new DocumentationError("invalid-documentation", `${field} is required`);
     }
     return trimmed;
 }
@@ -470,8 +470,8 @@ function normalizeAttributes(
             (typeof value === "string" && value.trim().length === 0) ||
             (typeof value === "number" && !Number.isFinite(value))
         ) {
-            throw new CollectionError(
-                "invalid-collection",
+            throw new DocumentationError(
+                "invalid-documentation",
                 "Source attributes must have non-empty keys and scalar values",
                 { key },
             );

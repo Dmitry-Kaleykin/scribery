@@ -2,9 +2,9 @@ export const MCP_TOOL_NAMES = [
     "list_projects",
     "search_codebase",
     "inspect_project_chunks",
-    "list_collections",
-    "list_collection_sources",
-    "search_collection",
+    "list_documentations",
+    "list_documentation_sources",
+    "search_documentation",
 ] as const;
 
 export type McpToolName = typeof MCP_TOOL_NAMES[number];

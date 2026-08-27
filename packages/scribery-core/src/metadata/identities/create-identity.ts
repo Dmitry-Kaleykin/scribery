@@ -14,15 +14,15 @@ export function createRepositoryId(configuredIdentity: string): string {
     return createIdentity("repository", [configuredIdentity]);
 }
 
-export function createCollectionId(configuredIdentity: string): string {
-    return createIdentity("collection", [configuredIdentity]);
+export function createDocumentationId(configuredIdentity: string): string {
+    return createIdentity("documentation", [configuredIdentity]);
 }
 
 export function createSourceId(
-    collectionId: string,
+    documentationId: string,
     externalIdentity: string,
 ): string {
-    return createIdentity("source", [collectionId, externalIdentity]);
+    return createIdentity("source", [documentationId, externalIdentity]);
 }
 
 export function createSnapshotId(

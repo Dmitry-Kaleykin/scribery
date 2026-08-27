@@ -19,7 +19,7 @@ describe("Scribery MCP server", () => {
         const server = createScriberyMcpServer({
             version: "test",
             indexesDirectory: join(directory, "indexes"),
-            collectionsDirectory: join(directory, "collections"),
+            documentationsDirectory: join(directory, "documentations"),
         });
         const client = new Client({ name: "test-client", version: "test" });
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -33,11 +33,11 @@ describe("Scribery MCP server", () => {
                 tools.map(({ name }) => name).sort(),
                 [
                     "inspect_project_chunks",
-                    "list_collection_sources",
-                    "list_collections",
+                    "list_documentation_sources",
+                    "list_documentations",
                     "list_projects",
                     "search_codebase",
-                    "search_collection",
+                    "search_documentation",
                 ],
             );
             assert.ok(tools.every(({ annotations }) =>
@@ -56,13 +56,13 @@ describe("Scribery MCP server", () => {
                 projects: [],
             });
 
-            const collections = await client.callTool({
-                name: "list_collections",
+            const documentations = await client.callTool({
+                name: "list_documentations",
                 arguments: {},
             });
-            assert.deepEqual(collections.structuredContent, {
+            assert.deepEqual(documentations.structuredContent, {
                 count: 0,
-                collections: [],
+                documentations: [],
             });
 
             const failedSearch = await client.callTool({
@@ -85,7 +85,7 @@ describe("Scribery MCP server", () => {
         const server = createScriberyMcpServer({
             version: "test",
             indexesDirectory: join(directory, "indexes"),
-            collectionsDirectory: join(directory, "collections"),
+            documentationsDirectory: join(directory, "documentations"),
             toolAllowlist: ["search_codebase"],
         });
         const client = new Client({ name: "test-client", version: "test" });
@@ -105,6 +105,52 @@ describe("Scribery MCP server", () => {
             assert.deepEqual(
                 Object.keys(search?.inputSchema.properties ?? {}),
                 ["query", "limit"],
+            );
+        } finally {
+            await client.close();
+            await server.close();
+        }
+    });
+
+    it("presents documentation retrieval as an explicit agent workflow", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "scribery-mcp-documentation-"));
+        const server = createScriberyMcpServer({
+            version: "test",
+            indexesDirectory: join(directory, "indexes"),
+            documentationsDirectory: join(directory, "documentations"),
+            toolAllowlist: ["list_documentations", "search_documentation"],
+        });
+        const client = new Client({ name: "test-client", version: "test" });
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+        await server.connect(serverTransport);
+        await client.connect(clientTransport);
+
+        try {
+            const { tools } = await client.listTools();
+            assert.deepEqual(
+                tools.map(({ name }) => name),
+                ["list_documentations", "search_documentation"],
+            );
+            const [list, search] = tools;
+            assert.equal(list?.title, "List documentation");
+            assert.match(list?.description ?? "", /searched with search_documentation/u);
+            assert.equal(search?.title, "Search documentation");
+            assert.match(search?.description ?? "", /API references/u);
+            assert.match(search?.description ?? "", /Call list_documentations first/u);
+            assert.doesNotMatch(
+                search?.description ?? "",
+                /indexed|default documentation|only one documentation|current project/iu,
+            );
+            assert.deepEqual(
+                search?.inputSchema.required,
+                ["query", "documentation"],
+            );
+            const documentationProperty = search?.inputSchema.properties
+                ?.documentation as { description?: string } | undefined;
+            assert.equal(
+                documentationProperty?.description,
+                "Documentation name or identifier returned by list_documentations.",
             );
         } finally {
             await client.close();

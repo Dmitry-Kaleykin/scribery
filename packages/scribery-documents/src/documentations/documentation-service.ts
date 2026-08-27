@@ -3,65 +3,65 @@ import type { RerankingProvider } from "scribery-core";
 import { SemanticRetriever, type RetrievalResult } from "scribery-core";
 import { SqliteStorageProvider, type StorageFilterCondition } from "scribery-core";
 import type {
-    CollectionBuildOptions,
-    CollectionBuildResult,
-    CollectionDocumentInput,
-    CollectionManifest,
-    CollectionRetrievalRequest,
-    CollectionSource,
-    CollectionSummary,
-    DeletedCollection,
-    ResolvedCollectionBuild,
-} from "./contracts/collection.js";
-import { CollectionError } from "./errors/collection-error.js";
-import { CollectionIndexer } from "./indexing/collection-indexer.js";
-import { CollectionCatalog } from "./managed/catalog.js";
-import { collectionDatabasePath } from "./managed/paths.js";
+    DocumentationBuildOptions,
+    DocumentationBuildResult,
+    DocumentationInput,
+    DocumentationManifest,
+    DocumentationRetrievalRequest,
+    DocumentationSource,
+    DocumentationSummary,
+    DeletedDocumentation,
+    ResolvedDocumentationBuild,
+} from "./contracts/documentation.js";
+import { DocumentationError } from "./errors/documentation-error.js";
+import { DocumentationIndexer } from "./indexing/documentation-indexer.js";
+import { DocumentationCatalog } from "./managed/catalog.js";
+import { documentationDatabasePath } from "./managed/paths.js";
 
-export interface CollectionServiceOptions {
+export interface DocumentationServiceOptions {
     embeddingProvider: EmbeddingProvider;
     rerankingProvider?: RerankingProvider;
-    collectionsDirectory?: string;
+    documentationsDirectory?: string;
 }
 
-export class CollectionService {
-    readonly #catalog: CollectionCatalog;
+export class DocumentationService {
+    readonly #catalog: DocumentationCatalog;
     readonly #embeddingProvider: EmbeddingProvider;
     readonly #rerankingProvider: RerankingProvider | undefined;
 
-    constructor(options: CollectionServiceOptions) {
-        this.#catalog = new CollectionCatalog(options.collectionsDirectory);
+    constructor(options: DocumentationServiceOptions) {
+        this.#catalog = new DocumentationCatalog(options.documentationsDirectory);
         this.#embeddingProvider = options.embeddingProvider;
         this.#rerankingProvider = options.rerankingProvider;
     }
 
-    createCollection(name: string): Promise<CollectionManifest> {
+    createDocumentation(name: string): Promise<DocumentationManifest> {
         return this.#catalog.create(name);
     }
 
-    listCollections(): Promise<readonly CollectionSummary[]> {
+    listDocumentations(): Promise<readonly DocumentationSummary[]> {
         return this.#catalog.list();
     }
 
-    deleteCollection(reference: string): Promise<DeletedCollection> {
+    deleteDocumentation(reference: string): Promise<DeletedDocumentation> {
         return this.#catalog.delete(reference);
     }
 
-    async listSources(reference: string): Promise<readonly CollectionSource[]> {
+    async listSources(reference: string): Promise<readonly DocumentationSource[]> {
         return (await this.#catalog.resolve(reference)).sources;
     }
 
     upsertDocuments(
         reference: string,
-        documents: readonly CollectionDocumentInput[],
-    ): Promise<CollectionManifest> {
+        documents: readonly DocumentationInput[],
+    ): Promise<DocumentationManifest> {
         return this.#catalog.upsertDocuments(reference, documents);
     }
 
     removeSources(
         reference: string,
         sourceIds: readonly string[],
-    ): Promise<CollectionManifest> {
+    ): Promise<DocumentationManifest> {
         return this.#catalog.removeSources(reference, sourceIds);
     }
 
@@ -69,7 +69,7 @@ export class CollectionService {
         reference: string,
         sourceIds: readonly string[],
         tags: readonly string[],
-    ): Promise<CollectionManifest> {
+    ): Promise<DocumentationManifest> {
         return this.#catalog.updateSourceTags(reference, sourceIds, "set", tags);
     }
 
@@ -77,7 +77,7 @@ export class CollectionService {
         reference: string,
         sourceIds: readonly string[],
         tags: readonly string[],
-    ): Promise<CollectionManifest> {
+    ): Promise<DocumentationManifest> {
         return this.#catalog.updateSourceTags(reference, sourceIds, "add", tags);
     }
 
@@ -85,46 +85,46 @@ export class CollectionService {
         reference: string,
         sourceIds: readonly string[],
         tags: readonly string[],
-    ): Promise<CollectionManifest> {
+    ): Promise<DocumentationManifest> {
         return this.#catalog.updateSourceTags(reference, sourceIds, "remove", tags);
     }
 
     clearSourceTags(
         reference: string,
         sourceIds: readonly string[],
-    ): Promise<CollectionManifest> {
+    ): Promise<DocumentationManifest> {
         return this.#catalog.updateSourceTags(reference, sourceIds, "clear");
     }
 
-    buildCollection(
+    buildDocumentation(
         reference: string,
-        options: CollectionBuildOptions = {},
-    ): Promise<CollectionBuildResult> {
-        return new CollectionIndexer(this.#catalog, this.#embeddingProvider)
+        options: DocumentationBuildOptions = {},
+    ): Promise<DocumentationBuildResult> {
+        return new DocumentationIndexer(this.#catalog, this.#embeddingProvider)
             .build(reference, options);
     }
 
-    async resolveActiveBuild(reference: string): Promise<ResolvedCollectionBuild> {
+    async resolveActiveBuild(reference: string): Promise<ResolvedDocumentationBuild> {
         const manifest = await this.#catalog.resolve(reference);
 
         if (
             manifest.activeBuild === undefined ||
             manifest.builtSourcesRevision !== manifest.sourcesRevision
         ) {
-            throw new CollectionError(
+            throw new DocumentationError(
                 "build-required",
-                `Collection ${manifest.name} must be built after its latest source changes`,
+                `Documentation ${manifest.name} must be built after its latest source changes`,
                 {
-                    collectionId: manifest.collectionId,
+                    documentationId: manifest.documentationId,
                     sourcesRevision: manifest.sourcesRevision,
                     builtSourcesRevision: manifest.builtSourcesRevision,
                 },
             );
         }
 
-        const databasePath = collectionDatabasePath(
+        const databasePath = documentationDatabasePath(
             this.#catalog.baseDirectory,
-            manifest.collectionId,
+            manifest.documentationId,
         );
         const storage = new SqliteStorageProvider(databasePath, {
             readOnly: true,
@@ -135,7 +135,7 @@ export class CollectionService {
             const build = await storage.getBuild(manifest.activeBuild.indexBuildId);
 
             if (build === undefined || build.status !== "ready") {
-                throw new CollectionError(
+                throw new DocumentationError(
                     "build-required",
                     `Active build for ${manifest.name} is not ready`,
                     { indexBuildId: manifest.activeBuild.indexBuildId },
@@ -150,7 +150,7 @@ export class CollectionService {
 
     async retrieve(
         reference: string,
-        request: CollectionRetrievalRequest,
+        request: DocumentationRetrievalRequest,
     ): Promise<readonly RetrievalResult[]> {
         const manifest = await this.#catalog.resolve(reference);
         const requestedSourceIds = request.scope?.sourceIds;
@@ -164,9 +164,9 @@ export class CollectionService {
             const unknown = requestedSourceIds.filter((sourceId) => !known.has(sourceId));
 
             if (unknown.length > 0) {
-                throw new CollectionError(
+                throw new DocumentationError(
                     "source-not-found",
-                    "Retrieval scope contains unknown collection sources",
+                    "Retrieval scope contains unknown documentation sources",
                     { sourceIds: unknown },
                 );
             }

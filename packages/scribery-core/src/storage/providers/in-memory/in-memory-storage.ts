@@ -298,7 +298,7 @@ export class InMemoryStorageProvider implements StorageProvider {
         if (targetMemberships === undefined) {
             throw new StorageError(
                 "storage-failure",
-                "Index build has no chunk membership collection",
+                "Index build has no chunk membership set",
                 { indexBuildId: targetBuild.indexBuildId },
             );
         }
@@ -401,7 +401,7 @@ export class InMemoryStorageProvider implements StorageProvider {
         if (memberships === undefined) {
             throw new StorageError(
                 "storage-failure",
-                "Index build has no chunk membership collection",
+                "Index build has no chunk membership set",
                 { indexBuildId },
             );
         }

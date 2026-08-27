@@ -7,22 +7,22 @@ import { describe, it } from "node:test";
 import { DeterministicFakeEmbeddingProvider } from "scribery-core";
 import { SqliteStorageProvider } from "scribery-core";
 import {
-    collectionDirectory,
-    CollectionError,
-    CollectionService,
+    documentationDirectory,
+    DocumentationError,
+    DocumentationService,
 } from "../index.js";
 
-describe("CollectionService", () => {
+describe("DocumentationService", () => {
     it("manages, builds, and hard-scopes generic code and text sources", async () => {
-        const directory = await mkdtemp(join(tmpdir(), "scribery-collection-"));
+        const directory = await mkdtemp(join(tmpdir(), "scribery-documentation-"));
 
         try {
-            const service = new CollectionService({
+            const service = new DocumentationService({
                 embeddingProvider: new DeterministicFakeEmbeddingProvider(16),
-                collectionsDirectory: directory,
+                documentationsDirectory: directory,
             });
-            const collection = await service.createCollection("Personal notes");
-            await service.upsertDocuments(collection.collectionId, [
+            const documentation = await service.createDocumentation("Personal notes");
+            await service.upsertDocuments(documentation.documentationId, [
                 {
                     externalId: "note:authentication",
                     logicalPath: "notes/authentication.txt",
@@ -46,15 +46,15 @@ describe("CollectionService", () => {
             ]);
 
             await assert.rejects(
-                service.retrieve(collection.collectionId, { query: "session token" }),
+                service.retrieve(documentation.documentationId, { query: "session token" }),
                 (error: unknown) => {
-                    assert.ok(error instanceof CollectionError);
+                    assert.ok(error instanceof DocumentationError);
                     assert.equal(error.code, "build-required");
                     return true;
                 },
             );
 
-            const firstBuild = await service.buildCollection(collection.collectionId, {
+            const firstBuild = await service.buildDocumentation(documentation.documentationId, {
                 maximumChunkSize: 120,
                 slidingWindowOverlap: 20,
             });
@@ -62,7 +62,7 @@ describe("CollectionService", () => {
             assert.equal(firstBuild.diagnostics.length, 0);
             assert.ok(firstBuild.indexedChunks > 2);
 
-            const sources = await service.listSources(collection.collectionId);
+            const sources = await service.listSources(documentation.documentationId);
             const note = sources.find(({ externalId }) =>
                 externalId === "note:authentication"
             );
@@ -71,13 +71,13 @@ describe("CollectionService", () => {
             assert.ok(code);
 
             assert.deepEqual(
-                await service.retrieve(collection.collectionId, {
+                await service.retrieve(documentation.documentationId, {
                     query: "session token",
                     scope: { sourceIds: [] },
                 }),
                 [],
             );
-            const scoped = await service.retrieve(collection.collectionId, {
+            const scoped = await service.retrieve(documentation.documentationId, {
                 query: "session token",
                 scope: { sourceIds: [note.sourceId] },
                 limit: 5,
@@ -91,7 +91,7 @@ describe("CollectionService", () => {
                 role: "assistant",
             });
 
-            const tagged = await service.retrieve(collection.collectionId, {
+            const tagged = await service.retrieve(documentation.documentationId, {
                 query: "session token",
                 scope: { tags: ["selected"] },
                 limit: 5,
@@ -99,7 +99,7 @@ describe("CollectionService", () => {
             assert.ok(tagged.length > 0);
             assert.ok(tagged.every(({ sourceId }) => sourceId === note.sourceId));
 
-            const resolved = await service.resolveActiveBuild(collection.collectionId);
+            const resolved = await service.resolveActiveBuild(documentation.documentationId);
             const storage = new SqliteStorageProvider(resolved.databasePath, {
                 readOnly: true,
                 immutable: true,
@@ -123,29 +123,29 @@ describe("CollectionService", () => {
                 metadata.chunkingStrategy === "cast"
             ));
 
-            await service.removeSources(collection.collectionId, [code.sourceId]);
+            await service.removeSources(documentation.documentationId, [code.sourceId]);
             await assert.rejects(
-                service.retrieve(collection.collectionId, { query: "anything" }),
-                (error: unknown) => error instanceof CollectionError &&
+                service.retrieve(documentation.documentationId, { query: "anything" }),
+                (error: unknown) => error instanceof DocumentationError &&
                     error.code === "build-required",
             );
-            const secondBuild = await service.buildCollection(collection.collectionId, {
+            const secondBuild = await service.buildDocumentation(documentation.documentationId, {
                 maximumChunkSize: 120,
                 slidingWindowOverlap: 20,
             });
             assert.equal(secondBuild.sourceCount, 1);
             assert.equal(secondBuild.reusedDocuments, 1);
             assert.ok(secondBuild.reusedChunks > 0);
-            assert.equal((await service.listCollections())[0]?.needsBuild, false);
+            assert.equal((await service.listDocumentations())[0]?.needsBuild, false);
 
-            const deleted = await service.deleteCollection(collection.collectionId);
-            assert.equal(deleted.collectionId, collection.collectionId);
+            const deleted = await service.deleteDocumentation(documentation.documentationId);
+            assert.equal(deleted.documentationId, documentation.documentationId);
             assert.equal(deleted.name, "Personal notes");
-            await assert.rejects(access(collectionDirectory(
+            await assert.rejects(access(documentationDirectory(
                 directory,
-                collection.collectionId,
+                documentation.documentationId,
             )));
-            assert.deepEqual(await service.listCollections(), []);
+            assert.deepEqual(await service.listDocumentations(), []);
         } finally {
             await rm(directory, { recursive: true, force: true });
         }
@@ -155,12 +155,12 @@ describe("CollectionService", () => {
         const directory = await mkdtemp(join(tmpdir(), "scribery-tags-"));
 
         try {
-            const service = new CollectionService({
+            const service = new DocumentationService({
                 embeddingProvider: new DeterministicFakeEmbeddingProvider(16),
-                collectionsDirectory: directory,
+                documentationsDirectory: directory,
             });
-            const collection = await service.createCollection("Tagged sources");
-            const added = await service.upsertDocuments(collection.collectionId, [{
+            const documentation = await service.createDocumentation("Tagged sources");
+            const added = await service.upsertDocuments(documentation.documentationId, [{
                 externalId: "note:one",
                 content: "A tagged note",
                 tags: ["one"],
@@ -168,7 +168,7 @@ describe("CollectionService", () => {
             const sourceId = added.sources[0]!.sourceId;
 
             const withAddedTags = await service.addSourceTags(
-                collection.collectionId,
+                documentation.documentationId,
                 [sourceId],
                 ["two", "one"],
             );
@@ -176,48 +176,48 @@ describe("CollectionService", () => {
             assert.equal(withAddedTags.sourcesRevision, added.sourcesRevision + 1);
 
             const unchangedAdd = await service.addSourceTags(
-                collection.collectionId,
+                documentation.documentationId,
                 [sourceId],
                 ["one"],
             );
             assert.equal(unchangedAdd.sourcesRevision, withAddedTags.sourcesRevision);
 
             const withRemovedTag = await service.removeSourceTags(
-                collection.collectionId,
+                documentation.documentationId,
                 [sourceId],
                 ["one"],
             );
             assert.deepEqual(withRemovedTag.sources[0]!.tags, ["two"]);
 
             const withSetTags = await service.setSourceTags(
-                collection.collectionId,
+                documentation.documentationId,
                 [sourceId],
                 ["final", "archive", "final"],
             );
             assert.deepEqual(withSetTags.sources[0]!.tags, ["archive", "final"]);
 
             const cleared = await service.clearSourceTags(
-                collection.collectionId,
+                documentation.documentationId,
                 [sourceId],
             );
             assert.deepEqual(cleared.sources[0]!.tags, []);
             const unchangedClear = await service.clearSourceTags(
-                collection.collectionId,
+                documentation.documentationId,
                 [sourceId],
             );
             assert.equal(unchangedClear.sourcesRevision, cleared.sourcesRevision);
 
             await assert.rejects(
                 service.addSourceTags(
-                    collection.collectionId,
+                    documentation.documentationId,
                     [sourceId, "source_missing"],
                     ["never-applied"],
                 ),
-                (error: unknown) => error instanceof CollectionError &&
+                (error: unknown) => error instanceof DocumentationError &&
                     error.code === "source-not-found",
             );
             assert.deepEqual(
-                (await service.listSources(collection.collectionId))[0]!.tags,
+                (await service.listSources(documentation.documentationId))[0]!.tags,
                 [],
             );
         } finally {

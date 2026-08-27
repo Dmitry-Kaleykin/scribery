@@ -3,9 +3,9 @@ import { basename, extname, resolve } from "node:path";
 
 import type { SelectItem } from "@earendil-works/pi-tui";
 import {
-    CollectionService,
-    type CollectionService as CollectionServiceType,
-    type CollectionSummary,
+    DocumentationService,
+    type DocumentationService as DocumentationServiceType,
+    type DocumentationSummary,
     type IndexingPreset,
     type ProviderProfileService,
     type RetrievalResult,
@@ -16,7 +16,7 @@ import type { ManualOperationManager } from "../operations/manual-operation-mana
 import type { ProviderAccess } from "../services/provider-access.js";
 import type { TranscriptTone } from "./contracts.js";
 
-export interface CollectionUi {
+export interface DocumentationUi {
     append(message: string, tone?: TranscriptTone): void;
     appendError(error: unknown): void;
     pick(title: string, items: readonly SelectItem[]): Promise<SelectItem | undefined>;
@@ -26,9 +26,9 @@ export interface CollectionUi {
     requestRender(): void;
 }
 
-export interface CollectionControllerOptions {
+export interface DocumentationControllerOptions {
     cwd: string;
-    ui: CollectionUi;
+    ui: DocumentationUi;
     operations: ManualOperationManager;
     providerAccess: ProviderAccess;
     profiles: ProviderProfileService;
@@ -42,19 +42,19 @@ export interface CollectionControllerOptions {
     liveRunning(): boolean;
 }
 
-export class CollectionController {
+export class DocumentationController {
     readonly #cwd: string;
-    readonly #ui: CollectionUi;
+    readonly #ui: DocumentationUi;
     readonly #operations: ManualOperationManager;
     readonly #providerAccess: ProviderAccess;
     readonly #profiles: ProviderProfileService;
     readonly #presets: () => Promise<readonly IndexingPreset[]>;
-    readonly #pickPreset: CollectionControllerOptions["pickPreset"];
+    readonly #pickPreset: DocumentationControllerOptions["pickPreset"];
     readonly #activePreference: () => ProjectPreference | undefined;
     readonly #searchProfile: () => Promise<string | undefined>;
     readonly #liveRunning: () => boolean;
 
-    constructor(options: CollectionControllerOptions) {
+    constructor(options: DocumentationControllerOptions) {
         this.#cwd = options.cwd;
         this.#ui = options.ui;
         this.#operations = options.operations;
@@ -68,57 +68,57 @@ export class CollectionController {
     }
 
     async manage(): Promise<void> {
-        const context = await this.#collectionService();
+        const context = await this.#documentationService();
         if (!context) return;
         const { service, profileName } = context;
-        const collections = await service.listCollections();
-        const selection = await this.#ui.pick("Document collections", [
-            { value: "__create", label: "+ Create collection", description: "Create an externally managed document set" },
-            ...collections.map((collection) => ({
-                value: collection.collectionId,
-                label: collection.name,
-                description: `${collection.sourceCount} sources · ${collection.needsBuild ? "build required" : "ready"}`,
+        const documentations = await service.listDocumentations();
+        const selection = await this.#ui.pick("Documentation", [
+            { value: "__create", label: "+ Create documentation", description: "Create managed reference documentation" },
+            ...documentations.map((documentation) => ({
+                value: documentation.documentationId,
+                label: documentation.name,
+                description: `${documentation.sourceCount} sources · ${documentation.needsBuild ? "build required" : "ready"}`,
             })),
         ]);
         if (!selection) return;
         if (selection.value === "__create") {
-            const name = (await this.#ui.input("Create document collection", "Name"))?.trim();
+            const name = (await this.#ui.input("Create documentation", "Name"))?.trim();
             if (!name) return;
-            const created = await service.createCollection(name);
-            this.#ui.append(`Created collection ${created.name}.`, "success");
+            const created = await service.createDocumentation(name);
+            this.#ui.append(`Created documentation ${created.name}.`, "success");
             return;
         }
-        const collection = collections.find(({ collectionId }) => collectionId === selection.value)!;
-        const action = await this.#ui.pick(collection.name, [
-            { value: "search", label: "Search collection" },
-            { value: "index", label: "Index collection", description: profileName },
-            { value: "sources", label: "Browse sources", description: `${collection.sourceCount} sources` },
+        const documentation = documentations.find(({ documentationId }) => documentationId === selection.value)!;
+        const action = await this.#ui.pick(documentation.name, [
+            { value: "search", label: "Search documentation" },
+            { value: "index", label: "Index documentation", description: profileName },
+            { value: "sources", label: "Browse sources", description: `${documentation.sourceCount} sources` },
             { value: "add", label: "Add local files" },
-            { value: "delete", label: "Delete collection" },
+            { value: "delete", label: "Delete documentation" },
         ]);
         if (!action) return;
         if (action.value === "search") {
-            await this.#searchCollection(service, collection);
+            await this.#searchDocumentation(service, documentation);
         } else if (action.value === "index") {
-            await this.#configureIndex(service, collection, profileName);
+            await this.#configureIndex(service, documentation, profileName);
         } else if (action.value === "sources") {
-            await this.#manageSources(service, collection);
+            await this.#manageSources(service, documentation);
         } else if (action.value === "add") {
-            await this.#addSources(service, collection);
-        } else if (action.value === "delete" && await this.#ui.confirm(`Delete collection ${collection.name}?`, false)) {
-            await service.deleteCollection(collection.collectionId);
-            this.#ui.append(`Deleted collection ${collection.name}.`, "success");
+            await this.#addSources(service, documentation);
+        } else if (action.value === "delete" && await this.#ui.confirm(`Delete documentation ${documentation.name}?`, false)) {
+            await service.deleteDocumentation(documentation.documentationId);
+            this.#ui.append(`Deleted documentation ${documentation.name}.`, "success");
         }
     }
 
-    async #collectionService(): Promise<{
-        service: CollectionServiceType;
+    async #documentationService(): Promise<{
+        service: DocumentationServiceType;
         profileName: string;
     } | undefined> {
         const profiles = await this.#profiles.list();
         const profileName = await this.#searchProfile() ?? profiles[0]?.name;
         if (!profileName) {
-            this.#ui.append("Create a provider profile before using collections.", "warning");
+            this.#ui.append("Create a provider profile before using documentation.", "warning");
             return undefined;
         }
         const profileService = await this.#providerAccess.profileService(profileName);
@@ -126,21 +126,21 @@ export class CollectionController {
         const rerankingProvider = profileService.createRerankingProvider(profile);
         return {
             profileName,
-            service: new CollectionService({
+            service: new DocumentationService({
                 embeddingProvider: profileService.createEmbeddingProvider(profile),
                 ...(rerankingProvider === undefined ? {} : { rerankingProvider }),
             }),
         };
     }
 
-    async #searchCollection(
-        service: CollectionServiceType,
-        collection: CollectionSummary,
+    async #searchDocumentation(
+        service: DocumentationServiceType,
+        documentation: DocumentationSummary,
     ): Promise<void> {
-        const query = await this.#ui.input(`Search ${collection.name}`, "Query");
+        const query = await this.#ui.input(`Search ${documentation.name}`, "Query");
         if (!query?.trim()) return;
         const normalized = query.trim();
-        const results = await service.retrieve(collection.collectionId, {
+        const results = await service.retrieve(documentation.documentationId, {
             query: normalized,
             limit: 10,
             context: { beforeChunks: 1, afterChunks: 1, maximumCharacters: 12_000 },
@@ -150,8 +150,8 @@ export class CollectionController {
     }
 
     async #configureIndex(
-        service: CollectionServiceType,
-        collection: CollectionSummary,
+        service: DocumentationServiceType,
+        documentation: DocumentationSummary,
         profileName: string,
     ): Promise<void> {
         if (this.#liveRunning()) {
@@ -164,15 +164,15 @@ export class CollectionController {
         }
         const presets = await this.#presets();
         if (presets.length === 0) {
-            this.#ui.append("Create an indexing preset with /preset before indexing a collection.", "warning");
+            this.#ui.append("Create an indexing preset with /preset before indexing documentation.", "warning");
             return;
         }
         const preferredPreset = this.#activePreference()?.preset;
         const preset = presets.find(({ name }) => name === preferredPreset) ??
-            await this.#selectPresetValue(presets, "Select collection indexing preset");
+            await this.#selectPresetValue(presets, "Select documentation indexing preset");
         if (!preset) return;
-        if (!await this.#ui.confirm(`Index ${collection.name} with ${profileName} · ${preset.name}?`)) return;
-        void this.#startIndex(service, collection, preset);
+        if (!await this.#ui.confirm(`Index ${documentation.name} with ${profileName} · ${preset.name}?`)) return;
+        void this.#startIndex(service, documentation, preset);
     }
 
     async #selectPresetValue(
@@ -184,19 +184,19 @@ export class CollectionController {
     }
 
     async #startIndex(
-        service: CollectionServiceType,
-        collection: CollectionSummary,
+        service: DocumentationServiceType,
+        documentation: DocumentationSummary,
         preset: IndexingPreset,
     ): Promise<void> {
         const operation = this.#operations.begin(
-            `collection:${collection.name}`,
-            `Preparing ${collection.name}`,
+            `documentation:${documentation.name}`,
+            `Preparing ${documentation.name}`,
         );
         const { controller } = operation;
         try {
-            const sources = await service.listSources(collection.collectionId);
+            const sources = await service.listSources(documentation.documentationId);
             const sourcePaths = new Map(sources.map((source) => [source.sourceId, source.logicalPath]));
-            const result = await service.buildCollection(collection.collectionId, {
+            const result = await service.buildDocumentation(documentation.documentationId, {
                 ...(preset.maximumChunkSize === undefined ? {} : { maximumChunkSize: preset.maximumChunkSize }),
                 ...(preset.windows1251 === true ? { encodingFallback: "windows-1251" as const } : {}),
                 signal: controller.signal,
@@ -215,14 +215,14 @@ export class CollectionController {
                 }),
             });
             this.#ui.append(
-                `✓ Indexed collection ${collection.name} in ${formatDuration(Date.now() - operation.startedAt)}\n` +
+                `✓ Indexed documentation ${documentation.name} in ${formatDuration(Date.now() - operation.startedAt)}\n` +
                 `  ${result.sourceCount} sources · ${result.indexedChunks} chunks · ` +
                 `${result.reusedEmbeddings} embeddings reused · build ${result.indexBuildId.slice(0, 12)}…`,
                 "success",
             );
         } catch (error: unknown) {
             if (controller.signal.aborted) {
-                this.#ui.append(`Indexing collection ${collection.name} was cancelled.`, "warning");
+                this.#ui.append(`Indexing documentation ${documentation.name} was cancelled.`, "warning");
             } else {
                 this.#ui.appendError(error);
             }
@@ -233,15 +233,15 @@ export class CollectionController {
     }
 
     async #manageSources(
-        service: CollectionServiceType,
-        collection: CollectionSummary,
+        service: DocumentationServiceType,
+        documentation: DocumentationSummary,
     ): Promise<void> {
-        const sources = await service.listSources(collection.collectionId);
+        const sources = await service.listSources(documentation.documentationId);
         if (sources.length === 0) {
-            this.#ui.append(`Collection ${collection.name} has no sources.`, "muted");
+            this.#ui.append(`Documentation ${documentation.name} has no sources.`, "muted");
             return;
         }
-        const selected = await this.#ui.pick(`${collection.name} sources`, sources.map((source) => ({
+        const selected = await this.#ui.pick(`${documentation.name} sources`, sources.map((source) => ({
             value: source.sourceId,
             label: source.logicalPath,
             description: source.tags.length > 0 ? source.tags.join(", ") : `${source.byteLength} bytes`,
@@ -259,17 +259,17 @@ export class CollectionController {
         } else if (action.value === "tags") {
             const tags = await this.#ui.input("Set source tags", "Comma separated", source.tags.join(", "));
             if (tags === undefined) return;
-            await service.setSourceTags(collection.collectionId, [source.sourceId], splitPatterns(tags));
+            await service.setSourceTags(documentation.documentationId, [source.sourceId], splitPatterns(tags));
             this.#ui.append(`Updated tags for ${source.logicalPath}.`, "success");
         } else if (action.value === "remove" && await this.#ui.confirm(`Remove ${source.logicalPath}?`, false)) {
-            await service.removeSources(collection.collectionId, [source.sourceId]);
-            this.#ui.append(`Removed ${source.logicalPath} from ${collection.name}.`, "success");
+            await service.removeSources(documentation.documentationId, [source.sourceId]);
+            this.#ui.append(`Removed ${source.logicalPath} from ${documentation.name}.`, "success");
         }
     }
 
     async #addSources(
-        service: CollectionServiceType,
-        collection: CollectionSummary,
+        service: DocumentationServiceType,
+        documentation: DocumentationSummary,
     ): Promise<void> {
         const pathsText = await this.#ui.input("Add local files", "Paths (comma separated)");
         if (!pathsText?.trim()) return;
@@ -286,8 +286,8 @@ export class CollectionController {
             ...(tags.length === 0 ? {} : { tags }),
             originalLocation: path,
         })));
-        const manifest = await service.upsertDocuments(collection.collectionId, documents);
-        this.#ui.append(`Added ${documents.length} source(s) to ${manifest.name}. Run /collection and choose Index collection.`, "success");
+        const manifest = await service.upsertDocuments(documentation.documentationId, documents);
+        this.#ui.append(`Added ${documents.length} source(s) to ${manifest.name}. Run /documentation and choose Index documentation.`, "success");
     }
 }
 

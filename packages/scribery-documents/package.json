@@ -1,7 +1,7 @@
 {
   "name": "scribery-documents",
   "version": "0.1.0",
-  "description": "Managed document collections and directory sources for Scribery",
+  "description": "Managed documentation and directory sources for Scribery",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -21,4 +21,3 @@
   "dependencies": { "scribery-core": "0.1.0" },
   "engines": { "node": ">=22.19.0" }
 }
-

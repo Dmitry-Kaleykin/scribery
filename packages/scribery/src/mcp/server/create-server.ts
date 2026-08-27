@@ -10,7 +10,7 @@ import {
 import type { ScriberyMcpServerOptions } from "../contracts/server.js";
 import { formatProjectSearchResult } from "../results/project-search-result.js";
 import { mcpToolFailure, mcpToolSuccess } from "../results/tool-result.js";
-import { McpCollectionService } from "../services/collection-service.js";
+import { McpDocumentationService } from "../services/documentation-service.js";
 import { McpProjectService } from "../services/project-service.js";
 import { resolveMcpToolAllowlist } from "../tools/tool-allowlist.js";
 
@@ -18,9 +18,8 @@ const projectReference = z.string().trim().min(1).optional().describe(
     "Project name or source root. Omit it when the server is configured for " +
     "the project or only one project is available.",
 );
-const collectionReference = z.string().trim().min(1).optional().describe(
-    "Collection name. Omit it when the server is configured for the collection " +
-    "or only one collection is available.",
+const documentationReference = z.string().trim().min(1).describe(
+    "Documentation name or identifier returned by list_documentations.",
 );
 const query = z.string().trim().min(1).describe(
     "Natural-language retrieval query.",
@@ -66,7 +65,7 @@ export function createScriberyMcpServer(
         { instructions: createMcpInstructions(enabledTools) },
     );
     const projects = new McpProjectService(options);
-    const collections = new McpCollectionService(options);
+    const documentations = new McpDocumentationService(options);
     const executeProjectSearch = async (
         input: Parameters<McpProjectService["search"]>[0],
         signal: AbortSignal,
@@ -102,7 +101,8 @@ export function createScriberyMcpServer(
             {
                 title: "Search the codebase",
                 description:
-                    "Search this project's source code and documentation by meaning. " +
+                    "Search this project's source code and repository-local " +
+                    "documentation by meaning. " +
                     "Use this first to locate implementations, understand behavior, " +
                     "or find related code across files—even when a symbol or filename " +
                     "is known. Call with only query; the project and current build are " +
@@ -164,52 +164,58 @@ export function createScriberyMcpServer(
         },
     );
 
-    if (enabledTools.has("list_collections")) server.registerTool(
-        "list_collections",
+    if (enabledTools.has("list_documentations")) server.registerTool(
+        "list_documentations",
         {
-            title: "List document collections",
+            title: "List documentation",
             description:
-                "List available document collections and their source counts.",
+                "List the available documentation that can be searched with " +
+                "search_documentation. Returns each documentation's name, " +
+                "identifier, and source count.",
             inputSchema: z.object({}),
             annotations: READ_ONLY_TOOL_ANNOTATIONS,
         },
         async () => {
             try {
-                return mcpToolSuccess(await collections.listCollections());
+                return mcpToolSuccess(await documentations.listDocumentations());
             } catch (error: unknown) {
                 return mcpToolFailure(error);
             }
         },
     );
 
-    if (enabledTools.has("list_collection_sources")) server.registerTool(
-        "list_collection_sources",
+    if (enabledTools.has("list_documentation_sources")) server.registerTool(
+        "list_documentation_sources",
         {
-            title: "List collection sources",
+            title: "List documentation sources",
             description:
-                "List document titles, paths, media types, and tags for a collection.",
-            inputSchema: z.object({ collection: collectionReference }),
+                "List document titles, paths, media types, and tags for the " +
+                "specified documentation.",
+            inputSchema: z.object({ documentation: documentationReference }),
             annotations: READ_ONLY_TOOL_ANNOTATIONS,
         },
         async (input) => {
             try {
-                return mcpToolSuccess(await collections.listSources(input.collection));
+                return mcpToolSuccess(await documentations.listSources(input.documentation));
             } catch (error: unknown) {
                 return mcpToolFailure(error);
             }
         },
     );
 
-    if (enabledTools.has("search_collection")) server.registerTool(
-        "search_collection",
+    if (enabledTools.has("search_documentation")) server.registerTool(
+        "search_documentation",
         {
-            title: "Search a document collection",
+            title: "Search documentation",
             description:
-                "Search a document collection by meaning. Returns ranked excerpts " +
-                "with source attribution and surrounding context.",
+                "Search documentation and reference material. Use this for API " +
+                "references, manuals, specifications, guides, design documents, " +
+                "and other explanatory material. Call list_documentations first " +
+                "if you do not know which documentation to search. Returns ranked " +
+                "excerpts with source attribution and surrounding context.",
             inputSchema: z.object({
                 query,
-                collection: collectionReference,
+                documentation: documentationReference,
                 sources: z.array(z.string().trim().min(1)).optional().describe(
                     "Optional source identifiers; only matching sources are searched.",
                 ),
@@ -224,11 +230,9 @@ export function createScriberyMcpServer(
         },
         async (input, extra) => {
             try {
-                return mcpToolSuccess(await collections.search({
+                return mcpToolSuccess(await documentations.search({
                     query: input.query,
-                    ...(input.collection === undefined
-                        ? {}
-                        : { collectionReference: input.collection }),
+                    documentationReference: input.documentation,
                     ...(input.sources === undefined
                         ? {}
                         : { sourceIds: input.sources }),
@@ -266,13 +270,22 @@ function createMcpInstructions(enabledTools: ReadonlySet<string>): string {
     const instructions = [
         "Use these tools to search and inspect source code and documentation.",
         "Every tool is read-only and cannot change files, indexes, projects, " +
-            "collections, sources, or tags.",
+            "documentation, sources, or tags.",
     ];
 
     if (enabledTools.has("search_codebase")) {
         instructions.push(
             "Use search_codebase first for questions about source-code behavior, " +
-                "architecture, or implementation. It needs only a query.",
+                "architecture, or implementation in the current project. It needs " +
+                "only a query.",
+        );
+    }
+
+    if (enabledTools.has("search_documentation")) {
+        instructions.push(
+            "Use search_documentation for separately managed documentation and " +
+                "reference material. If you do not know which documentation to " +
+                "search, call list_documentations first.",
         );
     }
 

@@ -38,6 +38,6 @@ stable build publication, live target naming, and retrieval freshness gates.
 
 ### Documents
 
-Collections, directory synchronization, source tags, and future structured
+Documentation, directory synchronization, source tags, and future structured
 document extraction are document-product concerns. A directory is a source
 adapter rather than the name of the product.

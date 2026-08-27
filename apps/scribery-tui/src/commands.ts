@@ -10,7 +10,7 @@ export const COMMANDS: readonly SlashCommand[] = [
     { name: "builds", description: "Browse immutable build history" },
     { name: "target", description: "Inspect or switch retrieval targets" },
     { name: "chunks", description: "Inspect stored chunks for an indexed file", argumentHint: "<path>" },
-    { name: "collection", description: "Browse and search managed document collections" },
+    { name: "documentation", description: "Browse and search managed documentation" },
     { name: "jobs", description: "Show the active indexing operation" },
     { name: "mcp", description: "Print MCP configuration for the active project" },
     { name: "doctor", description: "Test the selected model provider" },

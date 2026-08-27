@@ -88,7 +88,7 @@ Possible fields include:
 - classification confidence;
 - file traits;
 - indexing root identifier;
-- optional managed-collection source ID, title, media type, and tags.
+- optional managed-documentation source ID, title, media type, and tags.
 
 For initial builds, `encoding` is the decoder's final canonical label, either
 `utf-8` or `windows-1251`; configuration aliases are never persisted.

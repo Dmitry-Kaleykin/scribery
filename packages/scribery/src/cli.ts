@@ -14,12 +14,12 @@ import {
     serializeDocumentChunks,
 } from "./cli/chunks/format-document-chunks.js";
 import {
-    runCollectionCommand,
+    runDocumentationCommand,
     runSourceCommand,
-} from "./cli/collections/manage.js";
+} from "./cli/documentations/manage.js";
 import { runPresetCommand } from "./cli/configuration/presets.js";
 import { runProfileCommand } from "./cli/configuration/profiles.js";
-import { runCollectionSearchIfRequested } from "./cli/collections/search.js";
+import { runDocumentationSearchIfRequested } from "./cli/documentations/search.js";
 import { createProjectIndexingEventReporter } from "./cli/progress/project-indexing-events.js";
 import { runRetrievalCommand } from "./cli/projects/retrieval.js";
 import { normalizeRelativePath } from "scribery-core";
@@ -74,8 +74,8 @@ try {
         await runSearch(commandArguments);
     } else if (command === "chunks") {
         await runChunks(commandArguments);
-    } else if (command === "collection") {
-        await runCollectionCommand(commandArguments);
+    } else if (command === "documentation") {
+        await runDocumentationCommand(commandArguments);
     } else if (command === "source") {
         await runSourceCommand(commandArguments);
     } else if (command === "list") {
@@ -437,7 +437,7 @@ async function runDelete(args: readonly string[]): Promise<void> {
 }
 
 async function runSearch(args: readonly string[]): Promise<void> {
-    if (await runCollectionSearchIfRequested(args)) return;
+    if (await runDocumentationSearchIfRequested(args)) return;
 
     const parsed = parseArgs({
         args,
@@ -706,20 +706,20 @@ Chunks:
     scribery chunks --db <file> --build <indexBuildId> --path <relativePath>
         [--json]
 
-Collections:
-    scribery collection create <name>
-    scribery collection list
-    scribery collection delete <collection>
-    scribery source add <collection> <file...> [--tag <tag>] [--encoding <encoding>]
-    scribery source list <collection>
-    scribery source remove <collection> <sourceId...>
-    scribery source tags set <collection> <sourceId...> --tag <tag>
-    scribery source tags add <collection> <sourceId...> --tag <tag>
-    scribery source tags remove <collection> <sourceId...> --tag <tag>
-    scribery source tags clear <collection> <sourceId...>
-    scribery collection build <collection> --model <id> --dimensions <n>
+Documentation:
+    scribery documentation create <name>
+    scribery documentation list
+    scribery documentation delete <documentation>
+    scribery source add <documentation> <file...> [--tag <tag>] [--encoding <encoding>]
+    scribery source list <documentation>
+    scribery source remove <documentation> <sourceId...>
+    scribery source tags set <documentation> <sourceId...> --tag <tag>
+    scribery source tags add <documentation> <sourceId...> --tag <tag>
+    scribery source tags remove <documentation> <sourceId...> --tag <tag>
+    scribery source tags clear <documentation> <sourceId...>
+    scribery documentation build <documentation> --model <id> --dimensions <n>
         [--chunk-size <characters>] [--overlap <characters>] [--windows-1251]
-    scribery search <query> --collection <collection>
+    scribery search <query> --documentation <documentation>
         [--source <sourceId>] [--tag <tag>] [--limit <n>]
 
 Projects:
@@ -737,7 +737,7 @@ Retrieval targets:
     scribery retrieval remove <target> [--project <identifier-or-root>]
 
 MCP (read-only stdio):
-    scribery mcp [--project <identifier-or-root>] [--collection <name-or-id>]
+    scribery mcp [--project <identifier-or-root>]
         [--profile <name>]
         [--base-url http://127.0.0.1:1234/v1] [--api-key <key>]
         [--rerank-model <id>]

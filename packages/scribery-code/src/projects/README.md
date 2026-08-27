@@ -113,8 +113,8 @@ Explicit per-call MCP build selection overrides the active target. With no store
 selection, retrieval falls back to the newest ready build for backward
 compatibility.
 
-Collections have their own active builds and source tags. Project retrieval
-targets do not participate in collection lookup, filtering, or lifecycle.
+Documentation has its own active builds and source tags. Project retrieval
+targets do not participate in documentation lookup, filtering, or lifecycle.
 
 ## Branch-aware live indexing
 

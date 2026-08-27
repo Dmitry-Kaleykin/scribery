@@ -1,5 +1,5 @@
 export {
-    type CollectionSearchInput,
+    type DocumentationSearchInput,
     type ProjectChunksInput,
     type ProjectSearchInput,
     type ScriberyMcpServerOptions,
@@ -13,7 +13,7 @@ export {
 } from "./constants/tools.js";
 export { runScriberyMcpServer } from "./run.js";
 export { createScriberyMcpServer } from "./server/create-server.js";
-export { McpCollectionService } from "./services/collection-service.js";
+export { McpDocumentationService } from "./services/documentation-service.js";
 export { McpProjectService } from "./services/project-service.js";
 export {
     parseMcpToolAllowlist,

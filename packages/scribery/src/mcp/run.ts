@@ -14,7 +14,6 @@ export async function runScriberyMcpServer(
         args,
         options: {
             project: { type: "string" },
-            collection: { type: "string" },
             profile: { type: "string" },
             "base-url": { type: "string" },
             "api-key": { type: "string" },
@@ -68,14 +67,6 @@ export async function runScriberyMcpServer(
         ...(parsed.values.project === undefined
             ? {}
             : { defaultProjectReference: requiredText(parsed.values.project, "--project") }),
-        ...(parsed.values.collection === undefined
-            ? {}
-            : {
-                defaultCollectionReference: requiredText(
-                    parsed.values.collection,
-                    "--collection",
-                ),
-            }),
         ...(baseUrl === undefined
             ? {}
             : { baseUrl: requiredText(baseUrl, "--base-url") }),
@@ -114,7 +105,7 @@ function printMcpUsage(): void {
     console.log(`Scribery MCP server (read-only stdio)
 
 Usage:
-    scribery-mcp [--project <identifier-or-root>] [--collection <name-or-id>]
+    scribery-mcp [--project <identifier-or-root>]
         [--profile <name>]
         [--base-url http://127.0.0.1:1234/v1] [--api-key <key>]
         [--rerank-model <id>]
@@ -122,7 +113,7 @@ Usage:
 
 Available tools:
     list_projects, search_codebase, inspect_project_chunks,
-    list_collections, list_collection_sources, search_collection
+    list_documentations, list_documentation_sources, search_documentation
 
 Legacy --tools name:
     retrieval maps to search_codebase

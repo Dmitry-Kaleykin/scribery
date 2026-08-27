@@ -1,9 +1,9 @@
 import { parseArgs } from "node:util";
 
 import {
-    CollectionCatalog,
-    CollectionService,
-    collectionDatabasePath,
+    DocumentationCatalog,
+    DocumentationService,
+    documentationDatabasePath,
 } from "scribery-documents";
 import {
     createOpenAiCompatibleRerankingProvider,
@@ -15,11 +15,11 @@ import {
     positiveInteger,
 } from "../arguments/values.js";
 
-export async function runCollectionSearchIfRequested(
+export async function runDocumentationSearchIfRequested(
     args: readonly string[],
 ): Promise<boolean> {
     if (!args.some((argument) =>
-        argument === "--collection" || argument.startsWith("--collection=")
+        argument === "--documentation" || argument.startsWith("--documentation=")
     )) {
         return false;
     }
@@ -28,7 +28,7 @@ export async function runCollectionSearchIfRequested(
         args,
         allowPositionals: true,
         options: {
-            collection: { type: "string" },
+            documentation: { type: "string" },
             source: { type: "string", multiple: true },
             tag: { type: "string", multiple: true },
             "base-url": { type: "string" },
@@ -43,11 +43,11 @@ export async function runCollectionSearchIfRequested(
             "rerank-instruction": { type: "string" },
         },
     });
-    const reference = parsed.values.collection!;
+    const reference = parsed.values.documentation!;
     const query = parsed.positionals.join(" ").trim();
 
     if (parsed.values.language !== undefined) {
-        throw new Error("--language is not yet supported with --collection");
+        throw new Error("--language is not yet supported with --documentation");
     }
     if (
         parsed.values["rerank-model"] === undefined &&
@@ -56,17 +56,17 @@ export async function runCollectionSearchIfRequested(
         throw new Error("--rerank-model is required for reranking options");
     }
 
-    const catalog = new CollectionCatalog();
+    const catalog = new DocumentationCatalog();
     const manifest = await catalog.resolve(reference);
     if (
         manifest.activeBuild === undefined ||
         manifest.builtSourcesRevision !== manifest.sourcesRevision
     ) {
-        throw new Error(`Collection ${manifest.name} must be built first`);
+        throw new Error(`Documentation ${manifest.name} must be built first`);
     }
-    const databasePath = collectionDatabasePath(
+    const databasePath = documentationDatabasePath(
         catalog.baseDirectory,
-        manifest.collectionId,
+        manifest.documentationId,
     );
     const storage = new SqliteStorageProvider(databasePath, {
         readOnly: true,
@@ -84,7 +84,7 @@ export async function runCollectionSearchIfRequested(
         parsed.values["base-url"],
         parsed.values["rerank-instruction"],
     );
-    const service = new CollectionService({
+    const service = new DocumentationService({
         embeddingProvider: provider,
         ...(rerankingProvider === undefined ? {} : { rerankingProvider }),
     });

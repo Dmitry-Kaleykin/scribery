@@ -3,14 +3,13 @@ import type { McpToolSelection } from "../constants/tools.js";
 export interface ScriberyMcpServerOptions {
     version: string;
     defaultProjectReference?: string;
-    defaultCollectionReference?: string;
     baseUrl?: string;
     apiKey?: string | undefined;
     rerankingModel?: string;
     rerankingProtocol?: "completions" | "rerank";
     rerankingInstruction?: string;
     indexesDirectory?: string;
-    collectionsDirectory?: string;
+    documentationsDirectory?: string;
     toolAllowlist?: readonly McpToolSelection[];
 }
 
@@ -36,9 +35,9 @@ export interface ProjectChunksInput {
     limit?: number;
 }
 
-export interface CollectionSearchInput {
+export interface DocumentationSearchInput {
     query: string;
-    collectionReference?: string;
+    documentationReference: string;
     sourceIds?: readonly string[];
     tags?: readonly string[];
     limit?: number;

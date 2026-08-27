@@ -40,7 +40,7 @@ export {
 export { hashBytes, hashText } from "./hashing/content-hash.js";
 export {
     createChunkId,
-    createCollectionId,
+    createDocumentationId,
     createDocumentId,
     createEmbeddingId,
     createEmbeddingInputId,

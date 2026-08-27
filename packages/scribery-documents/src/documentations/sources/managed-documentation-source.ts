@@ -8,26 +8,26 @@ import type {
     SourceSnapshotProvider,
 } from "scribery-core";
 import type {
-    CollectionManifest,
-} from "../contracts/collection.js";
-import { CollectionError } from "../errors/collection-error.js";
-import { CollectionCatalog } from "../managed/catalog.js";
+    DocumentationManifest,
+} from "../contracts/documentation.js";
+import { DocumentationError } from "../errors/documentation-error.js";
+import { DocumentationCatalog } from "../managed/catalog.js";
 
-export interface ManagedCollectionSourceRequest {
-    manifest: CollectionManifest;
+export interface ManagedDocumentationSourceRequest {
+    manifest: DocumentationManifest;
     signal?: AbortSignal;
 }
 
-export class ManagedCollectionSourceProvider
-    implements SourceSnapshotProvider<ManagedCollectionSourceRequest> {
-    readonly #catalog: CollectionCatalog;
+export class ManagedDocumentationSourceProvider
+    implements SourceSnapshotProvider<ManagedDocumentationSourceRequest> {
+    readonly #catalog: DocumentationCatalog;
 
-    constructor(catalog: CollectionCatalog) {
+    constructor(catalog: DocumentationCatalog) {
         this.#catalog = catalog;
     }
 
     async prepare(
-        request: ManagedCollectionSourceRequest,
+        request: ManagedDocumentationSourceRequest,
     ): Promise<PreparedSourceSnapshot> {
         const { manifest } = request;
         const documents = await Promise.all(
@@ -39,8 +39,8 @@ export class ManagedCollectionSourceProvider
                 );
 
                 if (hashBytes(bytes) !== source.byteContentHash) {
-                    throw new CollectionError(
-                        "collection-storage-failure",
+                    throw new DocumentationError(
+                        "documentation-storage-failure",
                         `Stored content for ${source.sourceId} does not match its manifest`,
                         { sourceId: source.sourceId },
                     );
@@ -86,14 +86,14 @@ export class ManagedCollectionSourceProvider
 
         return {
             scopeId: createRepositoryId(
-                `collection:${manifest.collectionId}`,
+                `documentation:${manifest.documentationId}`,
             ),
             rootIdentity: ".",
-            sourceIdentity: `managed-collection:${membershipHash}`,
-            sourceSelectionHash: hashText(manifest.collectionId),
+            sourceIdentity: `managed-documentation:${membershipHash}`,
+            sourceSelectionHash: hashText(manifest.documentationId),
             provenance: {
-                kind: "managed-collection",
-                collectionId: manifest.collectionId,
+                kind: "managed-documentation",
+                documentationId: manifest.documentationId,
             },
             documents,
             diagnostics: [],

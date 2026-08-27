@@ -9,42 +9,42 @@ import {
 import { TextAndCodeIndexingPolicy } from "../../indexing/index.js";
 import { createDocumentsProcessingRuntime } from "../../indexing/runtime.js";
 import type {
-    CollectionBuildOptions,
-    CollectionBuildProgress,
-    CollectionBuildResult,
-    CollectionManifest,
-} from "../contracts/collection.js";
-import { CollectionError } from "../errors/collection-error.js";
-import { CollectionCatalog } from "../managed/catalog.js";
-import { collectionDatabasePath } from "../managed/paths.js";
+    DocumentationBuildOptions,
+    DocumentationBuildProgress,
+    DocumentationBuildResult,
+    DocumentationManifest,
+} from "../contracts/documentation.js";
+import { DocumentationError } from "../errors/documentation-error.js";
+import { DocumentationCatalog } from "../managed/catalog.js";
+import { documentationDatabasePath } from "../managed/paths.js";
 import {
-    ManagedCollectionSourceProvider,
-} from "../sources/managed-collection-source.js";
+    ManagedDocumentationSourceProvider,
+} from "../sources/managed-documentation-source.js";
 
-export class CollectionIndexer {
-    readonly #catalog: CollectionCatalog;
+export class DocumentationIndexer {
+    readonly #catalog: DocumentationCatalog;
     readonly #provider: EmbeddingProvider;
-    readonly #sources: ManagedCollectionSourceProvider;
+    readonly #sources: ManagedDocumentationSourceProvider;
 
-    constructor(catalog: CollectionCatalog, provider: EmbeddingProvider) {
+    constructor(catalog: DocumentationCatalog, provider: EmbeddingProvider) {
         this.#catalog = catalog;
         this.#provider = provider;
-        this.#sources = new ManagedCollectionSourceProvider(catalog);
+        this.#sources = new ManagedDocumentationSourceProvider(catalog);
     }
 
     async build(
         reference: string,
-        options: CollectionBuildOptions = {},
-    ): Promise<CollectionBuildResult> {
+        options: DocumentationBuildOptions = {},
+    ): Promise<DocumentationBuildResult> {
         const resolved = resolveOptions(options);
         const manifest = await this.#catalog.resolve(reference);
         const source = await this.#sources.prepare({
             manifest,
             ...(options.signal === undefined ? {} : { signal: options.signal }),
         });
-        const databasePath = collectionDatabasePath(
+        const databasePath = documentationDatabasePath(
             this.#catalog.baseDirectory,
-            manifest.collectionId,
+            manifest.documentationId,
         );
         const storage = new SqliteStorageProvider(databasePath);
 
@@ -101,7 +101,7 @@ export class CollectionIndexer {
             );
 
             return {
-                collectionId: manifest.collectionId,
+                documentationId: manifest.documentationId,
                 databasePath,
                 repositoryId: result.repositoryId,
                 snapshotId: result.snapshotId,
@@ -132,7 +132,7 @@ export class CollectionIndexer {
     }
 
     async #activateBuild(
-        manifest: CollectionManifest,
+        manifest: DocumentationManifest,
         completedAt: string,
         build: {
             repositoryId: string;
@@ -140,14 +140,14 @@ export class CollectionIndexer {
             indexBuildId: string;
         },
     ): Promise<void> {
-        const current = await this.#catalog.resolve(manifest.collectionId);
+        const current = await this.#catalog.resolve(manifest.documentationId);
 
         if (current.sourcesRevision !== manifest.sourcesRevision) {
-            throw new CollectionError(
+            throw new DocumentationError(
                 "build-required",
-                "Collection sources changed while the build was running",
+                "Documentation sources changed while the build was running",
                 {
-                    collectionId: manifest.collectionId,
+                    documentationId: manifest.documentationId,
                     builtRevision: manifest.sourcesRevision,
                     currentRevision: current.sourcesRevision,
                 },
@@ -163,7 +163,7 @@ export class CollectionIndexer {
     }
 }
 
-function resolveOptions(options: CollectionBuildOptions): {
+function resolveOptions(options: DocumentationBuildOptions): {
     maximumChunkSize: number;
     slidingWindowOverlap: number;
 } {
@@ -181,9 +181,9 @@ function resolveOptions(options: CollectionBuildOptions): {
         slidingWindowOverlap < 0 ||
         slidingWindowOverlap >= maximumChunkSize
     ) {
-        throw new CollectionError(
-            "invalid-collection",
-            "Collection chunk size and overlap are invalid",
+        throw new DocumentationError(
+            "invalid-documentation",
+            "Documentation chunk size and overlap are invalid",
             { maximumChunkSize, overlap: slidingWindowOverlap },
         );
     }
@@ -200,8 +200,8 @@ function textAndCodePolicyIdentity(
 }
 
 function emitProgress(
-    options: CollectionBuildOptions,
-    manifest: CollectionManifest,
+    options: DocumentationBuildOptions,
+    manifest: DocumentationManifest,
     progress: {
         phase: string;
         completed?: number;
@@ -214,12 +214,12 @@ function emitProgress(
         generatedEmbeddings?: number;
     },
 ): void {
-    const phase = collectionProgressPhase(progress.phase);
+    const phase = documentationProgressPhase(progress.phase);
     if (phase === undefined) return;
     const currentSourceId = progress.currentPath === undefined
         ? undefined
         : sourceIdForPath(manifest, progress.currentPath);
-    const event: CollectionBuildProgress = {
+    const event: DocumentationBuildProgress = {
         phase,
         completed: progress.completed ??
             progress.discoveredFiles ??
@@ -242,9 +242,9 @@ function emitProgress(
     options.onProgress?.(event);
 }
 
-function collectionProgressPhase(
+function documentationProgressPhase(
     phase: string,
-): CollectionBuildProgress["phase"] | undefined {
+): DocumentationBuildProgress["phase"] | undefined {
     if (phase === "processing" || phase === "embedding" || phase === "complete") {
         return phase;
     }
@@ -253,7 +253,7 @@ function collectionProgressPhase(
 }
 
 function sourceIdForPath(
-    manifest: CollectionManifest,
+    manifest: DocumentationManifest,
     path: string,
 ): string | undefined {
     return manifest.sources.find(({ logicalPath }) => logicalPath === path)

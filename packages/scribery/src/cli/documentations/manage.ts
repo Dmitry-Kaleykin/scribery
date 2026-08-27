@@ -3,8 +3,8 @@ import { basename, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import {
-    CollectionCatalog,
-    CollectionIndexer,
+    DocumentationCatalog,
+    DocumentationIndexer,
     type SourceTagMutation,
 } from "scribery-documents";
 import { OpenAiCompatibleEmbeddingProvider } from "scribery-core";
@@ -17,16 +17,16 @@ import { runCliEmbeddingProviderDiagnostic } from "../diagnostics/embedding-prov
 import { createCliProgressReporter } from "../progress/indexing-progress.js";
 import { mediaTypeFromPath } from "./media-types.js";
 
-export async function runCollectionCommand(args: readonly string[]): Promise<void> {
+export async function runDocumentationCommand(args: readonly string[]): Promise<void> {
     const [operation, ...operationArguments] = args;
-    const catalog = new CollectionCatalog();
+    const catalog = new DocumentationCatalog();
 
     if (operation === "create") {
         if (operationArguments.length !== 1) {
-            throw new Error("collection create requires exactly one name");
+            throw new Error("documentation create requires exactly one name");
         }
         console.log(JSON.stringify(
-            await catalog.create(required(operationArguments[0], "collection name")),
+            await catalog.create(required(operationArguments[0], "documentation name")),
             null,
             2,
         ));
@@ -35,46 +35,46 @@ export async function runCollectionCommand(args: readonly string[]): Promise<voi
 
     if (operation === "list") {
         if (operationArguments.length !== 0) {
-            throw new Error("collection list does not accept arguments");
+            throw new Error("documentation list does not accept arguments");
         }
-        const collections = await catalog.list();
-        console.log(JSON.stringify({ count: collections.length, collections }, null, 2));
+        const documentations = await catalog.list();
+        console.log(JSON.stringify({ count: documentations.length, documentations }, null, 2));
         return;
     }
 
     if (operation === "delete") {
         if (operationArguments.length !== 1) {
-            throw new Error("collection delete requires exactly one collection");
+            throw new Error("documentation delete requires exactly one documentation");
         }
         console.log(JSON.stringify({
             deleted: true,
-            ...await catalog.delete(required(operationArguments[0], "collection")),
+            ...await catalog.delete(required(operationArguments[0], "documentation")),
         }, null, 2));
         return;
     }
 
     if (operation === "build") {
-        await runCollectionBuild(operationArguments, catalog);
+        await runDocumentationBuild(operationArguments, catalog);
         return;
     }
 
-    throw new Error("collection requires create, list, build, or delete");
+    throw new Error("documentation requires create, list, build, or delete");
 }
 
 export async function runSourceCommand(args: readonly string[]): Promise<void> {
     const [operation, ...operationArguments] = args;
-    const catalog = new CollectionCatalog();
+    const catalog = new DocumentationCatalog();
 
     if (operation === "list") {
         if (operationArguments.length !== 1) {
-            throw new Error("source list requires exactly one collection");
+            throw new Error("source list requires exactly one documentation");
         }
         const manifest = await catalog.resolve(required(
             operationArguments[0],
-            "collection",
+            "documentation",
         ));
         console.log(JSON.stringify({
-            collectionId: manifest.collectionId,
+            documentationId: manifest.documentationId,
             count: manifest.sources.length,
             sources: manifest.sources,
             needsBuild: manifest.builtSourcesRevision !== manifest.sourcesRevision,
@@ -89,10 +89,10 @@ export async function runSourceCommand(args: readonly string[]): Promise<void> {
 
     if (operation === "remove") {
         if (operationArguments.length < 2) {
-            throw new Error("source remove requires a collection and source identifiers");
+            throw new Error("source remove requires a documentation and source identifiers");
         }
         const manifest = await catalog.removeSources(
-            required(operationArguments[0], "collection"),
+            required(operationArguments[0], "documentation"),
             operationArguments.slice(1),
         );
         printSourceMutation(manifest);
@@ -107,9 +107,9 @@ export async function runSourceCommand(args: readonly string[]): Promise<void> {
     throw new Error("source requires add, list, remove, or tags");
 }
 
-async function runCollectionBuild(
+async function runDocumentationBuild(
     args: readonly string[],
-    catalog: CollectionCatalog,
+    catalog: DocumentationCatalog,
 ): Promise<void> {
     const parsed = parseArgs({
         args,
@@ -125,9 +125,9 @@ async function runCollectionBuild(
             "windows-1251": { type: "boolean" },
         },
     });
-    const reference = required(parsed.positionals[0], "collection");
+    const reference = required(parsed.positionals[0], "documentation");
     if (parsed.positionals.length !== 1) {
-        throw new Error("collection build requires exactly one collection");
+        throw new Error("documentation build requires exactly one documentation");
     }
     const provider = new OpenAiCompatibleEmbeddingProvider({
         model: required(parsed.values.model, "--model"),
@@ -152,7 +152,7 @@ async function runCollectionBuild(
     });
     await runCliEmbeddingProviderDiagnostic(provider);
     const reportProgress = createCliProgressReporter();
-    const result = await new CollectionIndexer(catalog, provider).build(reference, {
+    const result = await new DocumentationIndexer(catalog, provider).build(reference, {
         ...(parsed.values["chunk-size"] === undefined
             ? {}
             : {
@@ -209,7 +209,7 @@ async function runCollectionBuild(
 
 async function addSources(
     args: readonly string[],
-    catalog: CollectionCatalog,
+    catalog: DocumentationCatalog,
 ): Promise<void> {
     const parsed = parseArgs({
         args,
@@ -219,7 +219,7 @@ async function addSources(
             encoding: { type: "string" },
         },
     });
-    const reference = required(parsed.positionals[0], "collection");
+    const reference = required(parsed.positionals[0], "documentation");
     const filePaths = parsed.positionals.slice(1);
     if (filePaths.length === 0) throw new Error("source add requires at least one file");
     const encodingValue = parsed.values.encoding;
@@ -254,7 +254,7 @@ async function addSources(
 
 async function updateSourceTags(
     args: readonly string[],
-    catalog: CollectionCatalog,
+    catalog: DocumentationCatalog,
 ): Promise<void> {
     const [mutationValue, ...mutationArguments] = args;
     if (!isSourceTagMutation(mutationValue)) {
@@ -268,7 +268,7 @@ async function updateSourceTags(
             tag: { type: "string", multiple: true },
         },
     });
-    const reference = required(parsed.positionals[0], "collection");
+    const reference = required(parsed.positionals[0], "documentation");
     const sourceIds = parsed.positionals.slice(1);
     if (sourceIds.length === 0) {
         throw new Error(`source tags ${mutationValue} requires source identifiers`);
@@ -282,7 +282,7 @@ async function updateSourceTags(
     );
     const selected = new Set(sourceIds);
     console.log(JSON.stringify({
-        collectionId: manifest.collectionId,
+        documentationId: manifest.documentationId,
         sourcesRevision: manifest.sourcesRevision,
         needsBuild: manifest.builtSourcesRevision !== manifest.sourcesRevision,
         sources: manifest.sources
@@ -296,13 +296,13 @@ function isSourceTagMutation(value: string | undefined): value is SourceTagMutat
 }
 
 function printSourceMutation(manifest: {
-    collectionId: string;
+    documentationId: string;
     sources: readonly unknown[];
     sourcesRevision: number;
     builtSourcesRevision?: number;
 }): void {
     console.log(JSON.stringify({
-        collectionId: manifest.collectionId,
+        documentationId: manifest.documentationId,
         sourceCount: manifest.sources.length,
         sourcesRevision: manifest.sourcesRevision,
         needsBuild: manifest.builtSourcesRevision !== manifest.sourcesRevision,

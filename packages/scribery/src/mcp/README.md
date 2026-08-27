@@ -1,6 +1,6 @@
 # MCP interface
 
-The MCP interface exposes Scribery' existing catalogs, immutable index
+The MCP interface exposes Scribery's existing catalogs, immutable index
 builds, and semantic retrieval pipeline to local MCP clients. It uses the stdio
 transport: the client owns the server process and exchanges MCP JSON-RPC messages
 over its stdin and stdout.
@@ -23,12 +23,12 @@ The first MCP surface intentionally contains only:
 - `list_projects`;
 - `search_codebase`;
 - `inspect_project_chunks`;
-- `list_collections`;
-- `list_collection_sources`;
-- `search_collection`.
+- `list_documentations`;
+- `list_documentation_sources`;
+- `search_documentation`.
 
 Every tool is advertised as read-only, non-destructive, and idempotent. Project
-and collection databases are opened in SQLite read-only immutable mode. The
+and documentation databases are opened in SQLite read-only immutable mode. The
 server exposes no index, create, add, tag, delete, or rebuild operation.
 
 Use `--tools` as a strict allowlist when an MCP client should see only part of
@@ -37,6 +37,7 @@ this surface:
 ```sh
 scribery-mcp --project /path/to/project --tools search_codebase
 scribery-mcp --tools search_codebase,inspect_project_chunks
+scribery-mcp --tools list_documentations,search_documentation
 ```
 
 The former allowlist name `retrieval` remains a compatibility alias for
@@ -63,10 +64,13 @@ provider profile.
 ## Scope selection
 
 `--project` accepts a managed project identifier, its exact source root, or its
-managed database path. `--collection` accepts a collection name or identifier.
-Collection calls can override their default. `search_codebase` deliberately has
-no project or build selector: configure `--project` when starting the server. If
-no project is configured, the server selects the only available project.
+managed database path. `search_codebase` deliberately has no project or build
+selector: configure `--project` when starting the server. If no project is
+configured, the server selects the only available project.
+
+Documentation selection is explicit. Call `list_documentations` to obtain a name
+or identifier, then pass it in the required `documentation` argument to
+`search_documentation` or `list_documentation_sources`.
 
 Project search uses the project's active selection—a named target or a directly
 selected build—and re-reads that selection for every request. A CLI

@@ -34,7 +34,7 @@ import { PromptLabelComponent } from "./components/prompt-label.js";
 import { SearchResultsComponent } from "./components/search-results.js";
 import type { ProjectPreference } from "./domain/project-preferences.js";
 import { ProfileController } from "./features/profile-controller.js";
-import { CollectionController } from "./features/collection-controller.js";
+import { DocumentationController } from "./features/documentation-controller.js";
 import { LiveIndexingController } from "./features/live-indexing-controller.js";
 import { ProjectController } from "./features/project-controller.js";
 import { ProjectIndexingController } from "./features/project-indexing-controller.js";
@@ -98,7 +98,7 @@ export class ScriberyTuiApp {
     );
     readonly #profileController: ProfileController;
     readonly #presetController: PresetController;
-    readonly #collections: CollectionController;
+    readonly #documentations: DocumentationController;
     readonly #liveIndexing: LiveIndexingController;
     readonly #projectIndexing: ProjectIndexingController;
     readonly #projectController: ProjectController;
@@ -184,7 +184,7 @@ export class ScriberyTuiApp {
                 this.#profileController.pickProfile(profiles, title, currentName),
             liveRunning: () => this.#liveIndexing.running,
         });
-        this.#collections = new CollectionController({
+        this.#documentations = new DocumentationController({
             cwd: this.#cwd,
             ui: {
                 append: (message, tone) => this.#append(message, tone),
@@ -347,7 +347,7 @@ export class ScriberyTuiApp {
             case "builds": await this.#projectController.browseBuilds(); break;
             case "target": await this.#projectController.manageTargets(); break;
             case "chunks": await this.#projectController.inspectChunks(argument); break;
-            case "collection": await this.#collections.manage(); break;
+            case "documentation": await this.#documentations.manage(); break;
             case "jobs": this.#showJobs(); break;
             case "mcp": await this.#projectController.showMcp(); break;
             case "doctor": await this.#doctor(); break;

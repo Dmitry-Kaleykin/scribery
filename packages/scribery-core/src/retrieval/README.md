@@ -116,7 +116,7 @@ The scope may later include:
 
 - indexing root;
 - workspace;
-- collection;
+- documentation;
 - tenant;
 - access-control context.
 
@@ -540,7 +540,7 @@ The first implementation includes:
 
 - explicit repository, snapshot, and ready-build scope;
 - semantic retrieval over cAST code chunks, plus sliding-window text chunks in
-  managed collections;
+  managed documentation;
 - semantic query embedding using the build's compatible query mode;
 - storage-side snapshot and build filtering;
 - a small allowlist of `and`, `equals`, and `in` filters;
@@ -553,9 +553,9 @@ The first implementation includes:
 - cancellation and structured diagnostics;
 - optional local Qwen3 reranking through a provider-independent boundary.
 
-Managed collections resolve their active exact build on behalf of callers and
+Managed documentation resolves its active exact build on behalf of callers and
 add hard `sourceId` and tag scopes. These filters are applied before ranking; an
-explicitly empty collection scope returns no results.
+explicitly empty documentation scope returns no results.
 
 Plain-text document retrieval, lexical search, hybrid fusion, hosted reranking,
 diversity rules, parent-declaration source expansion, cross-snapshot search, and

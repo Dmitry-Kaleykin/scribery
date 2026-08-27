@@ -2,7 +2,7 @@
 
 Scribery is a local-first indexing and semantic-retrieval monorepo. It separates
 the shared build and retrieval engine from the two products that compose it:
-Git-aware code retrieval and managed document collections.
+Git-aware code retrieval and managed documentation.
 
 ```text
                          scribery-core
@@ -20,8 +20,8 @@ Git-aware code retrieval and managed document collections.
   embeddings, reranking, generic discovery, decoding, chunking, and retrieval.
 - `scribery-code` owns Git working trees, code indexing policy, managed projects,
   indexing recipes, retrieval targets, and branch-aware live indexing.
-- `scribery-documents` owns managed collections, document sources, tags, and the
-  text-and-code collection policy.
+- `scribery-documents` owns managed documentation, document sources, tags, and the
+  text-and-code documentation policy.
 - `scribery` composes both products into the command-line and MCP interfaces.
 - `scribery-tui` is the interactive terminal application.
 

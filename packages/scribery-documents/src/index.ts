@@ -1,3 +1,3 @@
-export * from "./collections/index.js";
+export * from "./documentations/index.js";
 export * from "./indexing/index.js";
 

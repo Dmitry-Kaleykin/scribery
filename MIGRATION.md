@@ -6,7 +6,7 @@
 - Split the reference implementation into `scribery-core`, `scribery-code`,
   `scribery-documents`, `scribery`, and `scribery-tui` workspaces.
 - Established and automatically checks one-way package dependencies.
-- Preserved code-project, collection, CLI, MCP, and TUI behavior and tests.
+- Preserved code-project, documentation, CLI, MCP, and TUI behavior and tests.
 - Renamed executables to `scribery`, `scribery-mcp`, and `scribery-tui`.
 - Moved new runtime state to `~/.scribery` and TUI overrides to
   `SCRIBERY_TUI_HOME`.

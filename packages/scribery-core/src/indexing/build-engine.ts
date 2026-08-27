@@ -311,8 +311,8 @@ function emitProgress(plan: IndexBuildPlan, progress: IndexingProgress): void {
 }
 
 function sourceLabel(source: PreparedSourceSnapshot): string {
-    if (source.provenance.kind === "managed-collection") {
-        return `collection ${source.provenance.collectionId}`;
+    if (source.provenance.kind === "managed-documentation") {
+        return `documentation ${source.provenance.documentationId}`;
     }
     return source.provenance.root;
 }
