@@ -60,9 +60,9 @@ export async function runDocumentationSearchIfRequested(
     const manifest = await catalog.resolve(reference);
     if (
         manifest.activeBuild === undefined ||
-        manifest.builtSourcesRevision !== manifest.sourcesRevision
+        manifest.activeBuild.configurationRevision !== manifest.configurationRevision
     ) {
-        throw new Error(`Documentation ${manifest.name} must be built first`);
+        throw new Error(`Documentation ${manifest.name} must be indexed first`);
     }
     const databasePath = documentationDatabasePath(
         catalog.baseDirectory,

@@ -711,13 +711,16 @@ Documentation:
     scribery documentation list
     scribery documentation delete <documentation>
     scribery source add <documentation> <file...> [--tag <tag>] [--encoding <encoding>]
+    scribery source add-directory <documentation> <directory> [--mount <path>]
+        [--include <glob>] [--exclude <glob>] [--include-hidden] [--no-gitignore]
+        [--max-file-size <bytes>] [--tag <tag>]
     scribery source list <documentation>
     scribery source remove <documentation> <sourceId...>
     scribery source tags set <documentation> <sourceId...> --tag <tag>
     scribery source tags add <documentation> <sourceId...> --tag <tag>
     scribery source tags remove <documentation> <sourceId...> --tag <tag>
     scribery source tags clear <documentation> <sourceId...>
-    scribery documentation build <documentation> --model <id> --dimensions <n>
+    scribery documentation index <documentation> --model <id> --dimensions <n>
         [--chunk-size <characters>] [--overlap <characters>] [--windows-1251]
     scribery search <query> --documentation <documentation>
         [--source <sourceId>] [--tag <tag>] [--limit <n>]

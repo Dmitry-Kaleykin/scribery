@@ -53,12 +53,12 @@ export async function runDocumentationCommand(args: readonly string[]): Promise<
         return;
     }
 
-    if (operation === "build") {
-        await runDocumentationBuild(operationArguments, catalog);
+    if (operation === "index") {
+        await runDocumentationIndex(operationArguments, catalog);
         return;
     }
 
-    throw new Error("documentation requires create, list, build, or delete");
+    throw new Error("documentation requires create, list, index, or delete");
 }
 
 export async function runSourceCommand(args: readonly string[]): Promise<void> {
@@ -75,10 +75,19 @@ export async function runSourceCommand(args: readonly string[]): Promise<void> {
         ));
         console.log(JSON.stringify({
             documentationId: manifest.documentationId,
-            count: manifest.sources.length,
-            sources: manifest.sources,
-            needsBuild: manifest.builtSourcesRevision !== manifest.sourcesRevision,
+            sourceDefinitionCount: manifest.sourceDefinitions.length,
+            indexedSourceCount: manifest.activeBuild?.indexedSources.length ?? 0,
+            configurationRevision: manifest.configurationRevision,
+            needsIndex: manifest.activeBuild?.configurationRevision !==
+                manifest.configurationRevision,
+            sourceDefinitions: manifest.sourceDefinitions,
+            indexedSources: manifest.activeBuild?.indexedSources ?? [],
         }, null, 2));
+        return;
+    }
+
+    if (operation === "add-directory") {
+        await addDirectorySource(operationArguments, catalog);
         return;
     }
 
@@ -91,7 +100,7 @@ export async function runSourceCommand(args: readonly string[]): Promise<void> {
         if (operationArguments.length < 2) {
             throw new Error("source remove requires a documentation and source identifiers");
         }
-        const manifest = await catalog.removeSources(
+        const manifest = await catalog.removeSourceDefinitions(
             required(operationArguments[0], "documentation"),
             operationArguments.slice(1),
         );
@@ -104,10 +113,10 @@ export async function runSourceCommand(args: readonly string[]): Promise<void> {
         return;
     }
 
-    throw new Error("source requires add, list, remove, or tags");
+    throw new Error("source requires add, add-directory, list, remove, or tags");
 }
 
-async function runDocumentationBuild(
+async function runDocumentationIndex(
     args: readonly string[],
     catalog: DocumentationCatalog,
 ): Promise<void> {
@@ -127,7 +136,7 @@ async function runDocumentationBuild(
     });
     const reference = required(parsed.positionals[0], "documentation");
     if (parsed.positionals.length !== 1) {
-        throw new Error("documentation build requires exactly one documentation");
+        throw new Error("documentation index requires exactly one documentation");
     }
     const provider = new OpenAiCompatibleEmbeddingProvider({
         model: required(parsed.values.model, "--model"),
@@ -152,7 +161,7 @@ async function runDocumentationBuild(
     });
     await runCliEmbeddingProviderDiagnostic(provider);
     const reportProgress = createCliProgressReporter();
-    const result = await new DocumentationIndexer(catalog, provider).build(reference, {
+    const result = await new DocumentationIndexer(catalog, provider).index(reference, {
         ...(parsed.values["chunk-size"] === undefined
             ? {}
             : {
@@ -187,9 +196,9 @@ async function runDocumentationBuild(
             ...(progress.phase === "complete"
                 ? { discoveredFiles: progress.total }
                 : {}),
-            ...(progress.currentSourceId === undefined
+            ...(progress.currentPath === undefined
                 ? {}
-                : { currentPath: progress.currentSourceId }),
+                : { currentPath: progress.currentPath }),
             ...(progress.reusedDocuments === undefined
                 ? {}
                 : { reusedDocuments: progress.reusedDocuments }),
@@ -205,6 +214,49 @@ async function runDocumentationBuild(
         }),
     });
     console.log(JSON.stringify(result, null, 2));
+}
+
+async function addDirectorySource(
+    args: readonly string[],
+    catalog: DocumentationCatalog,
+): Promise<void> {
+    const parsed = parseArgs({
+        args,
+        allowPositionals: true,
+        options: {
+            mount: { type: "string" },
+            include: { type: "string", multiple: true },
+            exclude: { type: "string", multiple: true },
+            "include-hidden": { type: "boolean" },
+            "no-gitignore": { type: "boolean" },
+            "max-file-size": { type: "string" },
+            tag: { type: "string", multiple: true },
+        },
+    });
+    if (parsed.positionals.length !== 2) {
+        throw new Error("source add-directory requires a documentation and directory");
+    }
+    const manifest = await catalog.addDirectorySource(
+        required(parsed.positionals[0], "documentation"),
+        {
+            root: resolve(required(parsed.positionals[1], "directory")),
+            ...(parsed.values.mount === undefined ? {} : { mountPath: parsed.values.mount }),
+            ...(parsed.values.include === undefined ? {} : { include: parsed.values.include }),
+            ...(parsed.values.exclude === undefined ? {} : { exclude: parsed.values.exclude }),
+            includeHidden: parsed.values["include-hidden"] === true,
+            useGitignore: parsed.values["no-gitignore"] !== true,
+            ...(parsed.values["max-file-size"] === undefined
+                ? {}
+                : {
+                    maximumFileByteLength: positiveInteger(
+                        parsed.values["max-file-size"],
+                        "--max-file-size",
+                    ),
+                }),
+            ...(parsed.values.tag === undefined ? {} : { tags: parsed.values.tag }),
+        },
+    );
+    printSourceMutation(manifest);
 }
 
 async function addSources(
@@ -283,9 +335,10 @@ async function updateSourceTags(
     const selected = new Set(sourceIds);
     console.log(JSON.stringify({
         documentationId: manifest.documentationId,
-        sourcesRevision: manifest.sourcesRevision,
-        needsBuild: manifest.builtSourcesRevision !== manifest.sourcesRevision,
-        sources: manifest.sources
+        configurationRevision: manifest.configurationRevision,
+        needsIndex: manifest.activeBuild?.configurationRevision !==
+            manifest.configurationRevision,
+        sourceDefinitions: manifest.sourceDefinitions
             .filter(({ sourceId }) => selected.has(sourceId))
             .map(({ sourceId, tags }) => ({ sourceId, tags })),
     }, null, 2));
@@ -297,14 +350,15 @@ function isSourceTagMutation(value: string | undefined): value is SourceTagMutat
 
 function printSourceMutation(manifest: {
     documentationId: string;
-    sources: readonly unknown[];
-    sourcesRevision: number;
-    builtSourcesRevision?: number;
+    sourceDefinitions: readonly unknown[];
+    configurationRevision: number;
+    activeBuild?: { configurationRevision: number };
 }): void {
     console.log(JSON.stringify({
         documentationId: manifest.documentationId,
-        sourceCount: manifest.sources.length,
-        sourcesRevision: manifest.sourcesRevision,
-        needsBuild: manifest.builtSourcesRevision !== manifest.sourcesRevision,
+        sourceDefinitionCount: manifest.sourceDefinitions.length,
+        configurationRevision: manifest.configurationRevision,
+        needsIndex: manifest.activeBuild?.configurationRevision !==
+            manifest.configurationRevision,
     }, null, 2));
 }

@@ -77,7 +77,9 @@ export class DocumentationController {
             ...documentations.map((documentation) => ({
                 value: documentation.documentationId,
                 label: documentation.name,
-                description: `${documentation.sourceCount} sources · ${documentation.needsBuild ? "build required" : "ready"}`,
+                description: `${documentation.sourceDefinitionCount} configured · ` +
+                    `${documentation.indexedSourceCount} indexed` +
+                    (documentation.needsIndex ? " · index required" : ""),
             })),
         ]);
         if (!selection) return;
@@ -92,8 +94,8 @@ export class DocumentationController {
         const action = await this.#ui.pick(documentation.name, [
             { value: "search", label: "Search documentation" },
             { value: "index", label: "Index documentation", description: profileName },
-            { value: "sources", label: "Browse sources", description: `${documentation.sourceCount} sources` },
-            { value: "add", label: "Add local files" },
+            { value: "sources", label: "Configure sources", description: `${documentation.sourceDefinitionCount} configured` },
+            { value: "indexed", label: "Browse indexed files", description: `${documentation.indexedSourceCount} files` },
             { value: "delete", label: "Delete documentation" },
         ]);
         if (!action) return;
@@ -103,8 +105,8 @@ export class DocumentationController {
             await this.#configureIndex(service, documentation, profileName);
         } else if (action.value === "sources") {
             await this.#manageSources(service, documentation);
-        } else if (action.value === "add") {
-            await this.#addSources(service, documentation);
+        } else if (action.value === "indexed") {
+            await this.#browseIndexedSources(service, documentation);
         } else if (action.value === "delete" && await this.#ui.confirm(`Delete documentation ${documentation.name}?`, false)) {
             await service.deleteDocumentation(documentation.documentationId);
             this.#ui.append(`Deleted documentation ${documentation.name}.`, "success");
@@ -194,9 +196,7 @@ export class DocumentationController {
         );
         const { controller } = operation;
         try {
-            const sources = await service.listSources(documentation.documentationId);
-            const sourcePaths = new Map(sources.map((source) => [source.sourceId, source.logicalPath]));
-            const result = await service.buildDocumentation(documentation.documentationId, {
+            const result = await service.indexDocumentation(documentation.documentationId, {
                 ...(preset.maximumChunkSize === undefined ? {} : { maximumChunkSize: preset.maximumChunkSize }),
                 ...(preset.windows1251 === true ? { encodingFallback: "windows-1251" as const } : {}),
                 signal: controller.signal,
@@ -204,10 +204,10 @@ export class DocumentationController {
                     phase: progress.phase,
                     completed: progress.completed,
                     total: progress.total,
-                    ...(progress.currentSourceId === undefined
+                    ...(progress.currentPath === undefined
                         ? {}
-                        : { currentPath: sourcePaths.get(progress.currentSourceId) ?? progress.currentSourceId }),
-                    discoveredFiles: sources.length,
+                        : { currentPath: progress.currentPath }),
+                    discoveredFiles: progress.total,
                     ...(progress.reusedDocuments === undefined ? {} : { reusedDocuments: progress.reusedDocuments }),
                     ...(progress.reusedChunks === undefined ? {} : { reusedChunks: progress.reusedChunks }),
                     ...(progress.reusedEmbeddings === undefined ? {} : { reusedEmbeddings: progress.reusedEmbeddings }),
@@ -216,7 +216,7 @@ export class DocumentationController {
             });
             this.#ui.append(
                 `✓ Indexed documentation ${documentation.name} in ${formatDuration(Date.now() - operation.startedAt)}\n` +
-                `  ${result.sourceCount} sources · ${result.indexedChunks} chunks · ` +
+                `  ${result.sourceCount} files · ${result.indexedChunks} chunks · ` +
                 `${result.reusedEmbeddings} embeddings reused · build ${result.indexBuildId.slice(0, 12)}…`,
                 "success",
             );
@@ -236,35 +236,99 @@ export class DocumentationController {
         service: DocumentationServiceType,
         documentation: DocumentationSummary,
     ): Promise<void> {
-        const sources = await service.listSources(documentation.documentationId);
-        if (sources.length === 0) {
-            this.#ui.append(`Documentation ${documentation.name} has no sources.`, "muted");
+        const action = await this.#ui.pick(`${documentation.name} sources`, [
+            { value: "__directory", label: "+ Add directory", description: "Recursively index a live directory" },
+            { value: "__files", label: "+ Add local files", description: "Copy individual files into Scribery" },
+            { value: "__manage", label: "Manage configured sources" },
+        ]);
+        if (!action) return;
+        if (action.value === "__directory") {
+            await this.#addDirectorySource(service, documentation);
             return;
         }
-        const selected = await this.#ui.pick(`${documentation.name} sources`, sources.map((source) => ({
+        if (action.value === "__files") {
+            await this.#addSources(service, documentation);
+            return;
+        }
+        const sources = await service.listSourceDefinitions(documentation.documentationId);
+        if (sources.length === 0) {
+            this.#ui.append(`Documentation ${documentation.name} has no configured sources.`, "muted");
+            return;
+        }
+        const selected = await this.#ui.pick(`${documentation.name} configured sources`, sources.map((source) => ({
+            value: source.sourceId,
+            label: source.kind === "directory" ? source.mountPath : source.logicalPath,
+            description: source.tags.length > 0
+                ? `${source.kind} · ${source.tags.join(", ")}`
+                : source.kind,
+        })));
+        if (!selected) return;
+        const source = sources.find(({ sourceId }) => sourceId === selected.value)!;
+        const sourceLabel = source.kind === "directory" ? source.mountPath : source.logicalPath;
+        const sourceAction = await this.#ui.pick(sourceLabel, [
+            { value: "show", label: "Show source details" },
+            { value: "tags", label: "Set tags" },
+            { value: "remove", label: "Remove source" },
+        ]);
+        if (!sourceAction) return;
+        if (sourceAction.value === "show") {
+            this.#ui.append(JSON.stringify(source, null, 2));
+        } else if (sourceAction.value === "tags") {
+            const tags = await this.#ui.input("Set source tags", "Comma separated", source.tags.join(", "));
+            if (tags === undefined) return;
+            await service.setSourceTags(documentation.documentationId, [source.sourceId], splitPatterns(tags));
+            this.#ui.append(`Updated tags for ${sourceLabel}.`, "success");
+        } else if (sourceAction.value === "remove" && await this.#ui.confirm(`Remove ${sourceLabel}?`, false)) {
+            await service.removeSourceDefinitions(documentation.documentationId, [source.sourceId]);
+            this.#ui.append(`Removed ${sourceLabel} from ${documentation.name}.`, "success");
+        }
+    }
+
+    async #browseIndexedSources(
+        service: DocumentationServiceType,
+        documentation: DocumentationSummary,
+    ): Promise<void> {
+        const sources = await service.listIndexedSources(documentation.documentationId);
+        if (sources.length === 0) {
+            this.#ui.append(`Documentation ${documentation.name} has no indexed files.`, "muted");
+            return;
+        }
+        const selected = await this.#ui.pick(`${documentation.name} indexed files`, sources.map((source) => ({
             value: source.sourceId,
             label: source.logicalPath,
             description: source.tags.length > 0 ? source.tags.join(", ") : `${source.byteLength} bytes`,
         })));
         if (!selected) return;
         const source = sources.find(({ sourceId }) => sourceId === selected.value)!;
-        const action = await this.#ui.pick(source.logicalPath, [
-            { value: "show", label: "Show source details" },
-            { value: "tags", label: "Set tags" },
-            { value: "remove", label: "Remove source" },
-        ]);
-        if (!action) return;
-        if (action.value === "show") {
-            this.#ui.append(JSON.stringify(source, null, 2));
-        } else if (action.value === "tags") {
-            const tags = await this.#ui.input("Set source tags", "Comma separated", source.tags.join(", "));
-            if (tags === undefined) return;
-            await service.setSourceTags(documentation.documentationId, [source.sourceId], splitPatterns(tags));
-            this.#ui.append(`Updated tags for ${source.logicalPath}.`, "success");
-        } else if (action.value === "remove" && await this.#ui.confirm(`Remove ${source.logicalPath}?`, false)) {
-            await service.removeSources(documentation.documentationId, [source.sourceId]);
-            this.#ui.append(`Removed ${source.logicalPath} from ${documentation.name}.`, "success");
-        }
+        this.#ui.append(JSON.stringify(source, null, 2));
+    }
+
+    async #addDirectorySource(
+        service: DocumentationServiceType,
+        documentation: DocumentationSummary,
+    ): Promise<void> {
+        const pathText = await this.#ui.input("Add directory", "Directory path");
+        if (!pathText?.trim()) return;
+        const root = resolve(this.#cwd, pathText.trim());
+        const mountPath = await this.#ui.input("Add directory", "Path inside documentation", basename(root));
+        if (!mountPath?.trim()) return;
+        const includeText = await this.#ui.input("Add directory", "Include globs (comma separated; empty means all)", "");
+        if (includeText === undefined) return;
+        const excludeText = await this.#ui.input("Add directory", "Exclude patterns (comma separated)", "");
+        if (excludeText === undefined) return;
+        const tagsText = await this.#ui.input("Add directory", "Tags (comma separated)", "");
+        if (tagsText === undefined) return;
+        const manifest = await service.addDirectorySource(documentation.documentationId, {
+            root,
+            mountPath: mountPath.trim(),
+            include: splitPatterns(includeText),
+            exclude: splitPatterns(excludeText),
+            tags: splitPatterns(tagsText),
+        });
+        this.#ui.append(
+            `Configured ${root} in ${manifest.name}. Choose Index documentation to discover current files.`,
+            "success",
+        );
     }
 
     async #addSources(

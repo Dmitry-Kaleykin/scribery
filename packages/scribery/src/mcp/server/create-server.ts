@@ -189,8 +189,8 @@ export function createScriberyMcpServer(
         {
             title: "List documentation sources",
             description:
-                "List document titles, paths, media types, and tags for the " +
-                "specified documentation.",
+                "List configured inputs and the current document titles, paths, " +
+                "media types, and tags for the specified documentation.",
             inputSchema: z.object({ documentation: documentationReference }),
             annotations: READ_ONLY_TOOL_ANNOTATIONS,
         },

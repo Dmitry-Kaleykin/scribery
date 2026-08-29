@@ -3,14 +3,16 @@ import type { RerankingProvider } from "scribery-core";
 import { SemanticRetriever, type RetrievalResult } from "scribery-core";
 import { SqliteStorageProvider, type StorageFilterCondition } from "scribery-core";
 import type {
-    DocumentationBuildOptions,
-    DocumentationBuildResult,
+    DocumentationDirectoryInput,
+    DocumentationIndexOptions,
+    DocumentationIndexResult,
     DocumentationInput,
     DocumentationManifest,
     DocumentationRetrievalRequest,
-    DocumentationSource,
+    DocumentationSourceDefinition,
     DocumentationSummary,
     DeletedDocumentation,
+    IndexedDocumentationSource,
     ResolvedDocumentationBuild,
 } from "./contracts/documentation.js";
 import { DocumentationError } from "./errors/documentation-error.js";
@@ -47,8 +49,23 @@ export class DocumentationService {
         return this.#catalog.delete(reference);
     }
 
-    async listSources(reference: string): Promise<readonly DocumentationSource[]> {
-        return (await this.#catalog.resolve(reference)).sources;
+    async listSourceDefinitions(
+        reference: string,
+    ): Promise<readonly DocumentationSourceDefinition[]> {
+        return (await this.#catalog.resolve(reference)).sourceDefinitions;
+    }
+
+    async listIndexedSources(
+        reference: string,
+    ): Promise<readonly IndexedDocumentationSource[]> {
+        return (await this.resolveActiveBuild(reference)).manifest.activeBuild!.indexedSources;
+    }
+
+    addDirectorySource(
+        reference: string,
+        input: DocumentationDirectoryInput,
+    ): Promise<DocumentationManifest> {
+        return this.#catalog.addDirectorySource(reference, input);
     }
 
     upsertDocuments(
@@ -58,11 +75,11 @@ export class DocumentationService {
         return this.#catalog.upsertDocuments(reference, documents);
     }
 
-    removeSources(
+    removeSourceDefinitions(
         reference: string,
         sourceIds: readonly string[],
     ): Promise<DocumentationManifest> {
-        return this.#catalog.removeSources(reference, sourceIds);
+        return this.#catalog.removeSourceDefinitions(reference, sourceIds);
     }
 
     setSourceTags(
@@ -96,12 +113,12 @@ export class DocumentationService {
         return this.#catalog.updateSourceTags(reference, sourceIds, "clear");
     }
 
-    buildDocumentation(
+    indexDocumentation(
         reference: string,
-        options: DocumentationBuildOptions = {},
-    ): Promise<DocumentationBuildResult> {
+        options: DocumentationIndexOptions = {},
+    ): Promise<DocumentationIndexResult> {
         return new DocumentationIndexer(this.#catalog, this.#embeddingProvider)
-            .build(reference, options);
+            .index(reference, options);
     }
 
     async resolveActiveBuild(reference: string): Promise<ResolvedDocumentationBuild> {
@@ -109,15 +126,16 @@ export class DocumentationService {
 
         if (
             manifest.activeBuild === undefined ||
-            manifest.builtSourcesRevision !== manifest.sourcesRevision
+            manifest.activeBuild.configurationRevision !== manifest.configurationRevision
         ) {
             throw new DocumentationError(
-                "build-required",
-                `Documentation ${manifest.name} must be built after its latest source changes`,
+                "index-required",
+                `Documentation ${manifest.name} must be indexed after its latest source changes`,
                 {
                     documentationId: manifest.documentationId,
-                    sourcesRevision: manifest.sourcesRevision,
-                    builtSourcesRevision: manifest.builtSourcesRevision,
+                    configurationRevision: manifest.configurationRevision,
+                    indexedConfigurationRevision:
+                        manifest.activeBuild?.configurationRevision,
                 },
             );
         }
@@ -136,7 +154,7 @@ export class DocumentationService {
 
             if (build === undefined || build.status !== "ready") {
                 throw new DocumentationError(
-                    "build-required",
+                    "index-required",
                     `Active build for ${manifest.name} is not ready`,
                     { indexBuildId: manifest.activeBuild.indexBuildId },
                 );
@@ -152,7 +170,6 @@ export class DocumentationService {
         reference: string,
         request: DocumentationRetrievalRequest,
     ): Promise<readonly RetrievalResult[]> {
-        const manifest = await this.#catalog.resolve(reference);
         const requestedSourceIds = request.scope?.sourceIds;
 
         if (requestedSourceIds !== undefined && requestedSourceIds.length === 0) {
@@ -160,7 +177,10 @@ export class DocumentationService {
         }
 
         if (requestedSourceIds !== undefined) {
-            const known = new Set(manifest.sources.map(({ sourceId }) => sourceId));
+            const resolved = await this.resolveActiveBuild(reference);
+            const known = new Set(
+                resolved.manifest.activeBuild!.indexedSources.map(({ sourceId }) => sourceId),
+            );
             const unknown = requestedSourceIds.filter((sourceId) => !known.has(sourceId));
 
             if (unknown.length > 0) {

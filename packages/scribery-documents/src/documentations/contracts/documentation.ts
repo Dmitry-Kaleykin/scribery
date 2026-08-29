@@ -1,11 +1,13 @@
-import type { IndexBuildRecord } from "scribery-core";
-import type { SupportedEncoding } from "scribery-core";
+import type { IndexBuildRecord, SupportedEncoding } from "scribery-core";
 import type {
     RetrievalContextOptions,
     RetrievalRerankingOptions,
 } from "scribery-core";
 
-export interface DocumentationSource {
+export type DocumentationAttributeValue = string | number | boolean;
+
+export interface ManagedDocumentationSource {
+    kind: "managed";
     sourceId: string;
     externalId: string;
     logicalPath: string;
@@ -15,30 +17,65 @@ export interface DocumentationSource {
     byteContentHash: string;
     contentFilename: string;
     tags: readonly string[];
-    attributes: Readonly<Record<string, string | number | boolean>>;
+    attributes: Readonly<Record<string, DocumentationAttributeValue>>;
     originalLocation?: string;
     encoding?: SupportedEncoding;
     createdAt: string;
     updatedAt: string;
 }
 
+export interface DirectoryDocumentationSource {
+    kind: "directory";
+    sourceId: string;
+    root: string;
+    mountPath: string;
+    include: readonly string[];
+    exclude: readonly string[];
+    useGitignore: boolean;
+    includeHidden: boolean;
+    maximumFileByteLength?: number;
+    tags: readonly string[];
+    attributes: Readonly<Record<string, DocumentationAttributeValue>>;
+    createdAt: string;
+    updatedAt: string;
+}
+
+export type DocumentationSourceDefinition =
+    | ManagedDocumentationSource
+    | DirectoryDocumentationSource;
+
+export interface IndexedDocumentationSource {
+    sourceId: string;
+    sourceDefinitionId: string;
+    logicalPath: string;
+    title: string;
+    byteLength: number;
+    byteContentHash: string;
+    tags: readonly string[];
+    attributes: Readonly<Record<string, DocumentationAttributeValue>>;
+    originalLocation?: string;
+    mediaType?: string;
+    encoding?: SupportedEncoding;
+}
+
 export interface ActiveDocumentationBuild {
     repositoryId: string;
     snapshotId: string;
     indexBuildId: string;
+    configurationRevision: number;
+    indexedSources: readonly IndexedDocumentationSource[];
     completedAt: string;
 }
 
 export interface DocumentationManifest {
-    schemaVersion: 1;
+    schemaVersion: 2;
     documentationId: string;
     name: string;
     createdAt: string;
     updatedAt: string;
-    sourcesRevision: number;
-    builtSourcesRevision?: number;
+    configurationRevision: number;
+    sourceDefinitions: readonly DocumentationSourceDefinition[];
     activeBuild?: ActiveDocumentationBuild;
-    sources: readonly DocumentationSource[];
 }
 
 export interface DocumentationInput {
@@ -48,33 +85,45 @@ export interface DocumentationInput {
     title?: string;
     mediaType?: string;
     tags?: readonly string[];
-    attributes?: Readonly<Record<string, string | number | boolean>>;
+    attributes?: Readonly<Record<string, DocumentationAttributeValue>>;
     originalLocation?: string;
     encoding?: SupportedEncoding;
 }
 
-export interface DocumentationBuildOptions {
+export interface DocumentationDirectoryInput {
+    root: string;
+    mountPath?: string;
+    include?: readonly string[];
+    exclude?: readonly string[];
+    useGitignore?: boolean;
+    includeHidden?: boolean;
+    maximumFileByteLength?: number;
+    tags?: readonly string[];
+    attributes?: Readonly<Record<string, DocumentationAttributeValue>>;
+}
+
+export interface DocumentationIndexOptions {
     maximumChunkSize?: number;
     slidingWindowOverlap?: number;
     maximumEmbeddingInputsPerBatch?: number;
     maximumFileByteLength?: number;
     encodingFallback?: "windows-1251";
     signal?: AbortSignal;
-    onProgress?: (progress: DocumentationBuildProgress) => void;
+    onProgress?: (progress: DocumentationIndexProgress) => void;
 }
 
-export interface DocumentationBuildProgress {
+export interface DocumentationIndexProgress {
     phase: "processing" | "embedding" | "finalizing" | "complete";
     completed: number;
     total: number;
-    currentSourceId?: string;
+    currentPath?: string;
     reusedDocuments?: number;
     reusedChunks?: number;
     reusedEmbeddings?: number;
     generatedEmbeddings?: number;
 }
 
-export interface DocumentationBuildResult {
+export interface DocumentationIndexResult {
     documentationId: string;
     databasePath: string;
     repositoryId: string;
@@ -88,10 +137,10 @@ export interface DocumentationBuildResult {
     reusedEmbeddings: number;
     generatedEmbeddings: number;
     reusedBuild: boolean;
-    diagnostics: readonly DocumentationBuildDiagnostic[];
+    diagnostics: readonly DocumentationIndexDiagnostic[];
 }
 
-export interface DocumentationBuildDiagnostic {
+export interface DocumentationIndexDiagnostic {
     sourceId: string;
     logicalPath: string;
     code: string;
@@ -101,10 +150,11 @@ export interface DocumentationBuildDiagnostic {
 export interface DocumentationSummary {
     documentationId: string;
     name: string;
-    sourceCount: number;
-    sourcesRevision: number;
-    builtSourcesRevision?: number;
-    needsBuild: boolean;
+    sourceDefinitionCount: number;
+    indexedSourceCount: number;
+    configurationRevision: number;
+    indexedConfigurationRevision?: number;
+    needsIndex: boolean;
     databasePath: string;
     activeBuild?: ActiveDocumentationBuild;
 }

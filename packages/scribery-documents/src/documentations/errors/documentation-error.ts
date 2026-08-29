@@ -4,7 +4,7 @@ export type DocumentationErrorCode =
     | "documentation-exists"
     | "source-not-found"
     | "source-conflict"
-    | "build-required"
+    | "index-required"
     | "documentation-storage-failure";
 
 export class DocumentationError extends Error {

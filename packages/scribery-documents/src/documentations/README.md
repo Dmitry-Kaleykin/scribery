@@ -1,55 +1,42 @@
 # Documentation
 
-Documentation is a named, managed retrieval corpus whose resources live under
-`~/.scribery/documentations`. It is independent of any Git working tree and may
-contain files from unrelated locations or documents supplied directly by another
-local application.
+Documentation is a named retrieval corpus stored under
+`~/.scribery/documentations`. A corpus is independent of projects and Git working
+trees. Its source configuration can combine:
 
-The documentation model has three levels:
+- live directories, discovered recursively whenever the corpus is indexed; and
+- managed documents whose exact supplied bytes are copied into Scribery.
 
-- documentation is the retrieval and active-build boundary;
-- a source is one independently managed external identity;
-- a document revision is the exact content and retrieval metadata indexed for a
-  source.
+The manifest uses schema version 2 and stores source definitions rather than a
+materialized directory listing. A directory definition records its absolute root,
+logical mount path, include/exclude rules, hidden-file and gitignore behavior,
+size limit, tags, and scalar attributes. A managed definition records a stable
+external identity, copied content hash, logical path, media type, and metadata.
+There is intentionally no schema-v1 migration because no deployed documentation
+catalog needs one.
 
-Source upserts are idempotent by `externalId`. Scribery derives a stable
-`sourceId`, stores the exact supplied bytes in its managed directory, and records
-the source's logical path, title, media type, tags, and optional encoding. Removing
-a source changes documentation membership but does not mutate immutable historical
-index builds. Generic scalar source attributes are preserved in retrieval results
-for future chat identifiers, roles, timestamps, and adapter-specific provenance.
+`indexDocumentation` is the only indexing operation. Each call discovers the
+current contents of every configured directory and reads managed documents, then
+constructs one immutable source snapshot. Added, changed, and deleted files are
+therefore handled identically. The shared `IndexBuildEngine` reuses a complete
+build when the snapshot is identical and otherwise reuses compatible unchanged
+documents, chunks, and embeddings.
 
-Source changes increment `sourcesRevision`. Retrieval is disabled until a ready
-build has atomically become active for that exact revision, preventing a chat from
-silently querying stale source membership. Compatible unchanged documents reuse
-their chunks and embeddings.
+After storage finishes, Scribery atomically publishes the build together with its
+exact indexed-file inventory. Each entry has a stable file-level `sourceId`, its
+parent `sourceDefinitionId`, logical path, content hash, tags, and provenance.
+Retrieval and source filters use this active inventory, so a nested file returned
+by search remains traceable to the configured directory that owns it.
 
-Tags are source metadata with four atomic mutations: `set`, `add`, `remove`, and
-`clear`. Mutations may target multiple sources, fail before writing when any
-source is unknown, and are idempotent when the normalized tag sets do not change.
-An actual tag change increments `sourcesRevision`, so tag-filtered retrieval cannot
-use stale indexed metadata.
+Changing source configuration increments `configurationRevision`. Retrieval is
+disabled until an index for that exact revision becomes active. Filesystem changes
+do not require a separate revision or synchronization action: the next ordinary
+index call observes them and publishes the resulting snapshot.
 
-Documentation indexing uses cAST whenever a registered code parser supports the
-classified format. Other decoded text uses the deterministic overlapping
-`sliding-window` strategy. Binary, unknown, empty, and oversized sources produce
-diagnostics rather than embeddings.
+Tags belong to source definitions and are inherited by every discovered file.
+The `set`, `add`, `remove`, and `clear` mutations are atomic and idempotent.
 
-`ManagedDocumentationSourceProvider` converts the documentation manifest and copied
-bytes into the same prepared-source contract used by project indexing. The
-documentation package injects its classification, decoding, parser, and
-chunking runtime into the shared `IndexBuildEngine`. Core then owns build
-orchestration, reuse, embeddings, storage, and publication; documentation does not
-maintain a parallel indexing pipeline.
-
-Retrieval accepts an optional hard source scope. An omitted scope searches the
-whole documentation, while an explicitly empty source or tag list returns no results.
-Source and tag filters are applied by storage before ranking or reranking.
-
-`DocumentationService` is the transport-neutral API for future adapters. It exposes
-documentation creation, listing, and deletion; `upsertDocuments`, `listSources`,
-`removeSources`; `setSourceTags`, `addSourceTags`, `removeSourceTags`, and
-`clearSourceTags`; `buildDocumentation`, active-build resolution, and `retrieve`.
-Callers do not need to know the SQLite path or immutable build IDs. Deleting
-documentation removes its entire managed directory, including copied source bytes,
-its database, and immutable historical builds.
+Documentation indexing uses cAST for supported code and deterministic overlapping
+windows for other decoded text. Binary, unknown, empty, and oversized files produce
+diagnostics rather than embeddings. The MCP layer remains read-only; configuration
+and indexing are performed through the service, CLI, or TUI.

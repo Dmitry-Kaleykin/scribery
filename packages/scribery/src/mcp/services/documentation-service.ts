@@ -39,10 +39,14 @@ export class McpDocumentationService {
         return {
             documentationId: manifest.documentationId,
             name: manifest.name,
-            sourceCount: manifest.sources.length,
-            sourcesRevision: manifest.sourcesRevision,
-            builtSourcesRevision: manifest.builtSourcesRevision,
-            sources: manifest.sources,
+            sourceDefinitionCount: manifest.sourceDefinitions.length,
+            indexedSourceCount: manifest.activeBuild?.indexedSources.length ?? 0,
+            configurationRevision: manifest.configurationRevision,
+            indexedConfigurationRevision: manifest.activeBuild?.configurationRevision,
+            needsIndex: manifest.activeBuild?.configurationRevision !==
+                manifest.configurationRevision,
+            sourceDefinitions: manifest.sourceDefinitions,
+            indexedSources: manifest.activeBuild?.indexedSources ?? [],
         };
     }
 
@@ -54,10 +58,10 @@ export class McpDocumentationService {
 
         if (
             manifest.activeBuild === undefined ||
-            manifest.builtSourcesRevision !== manifest.sourcesRevision
+            manifest.activeBuild.configurationRevision !== manifest.configurationRevision
         ) {
             throw new Error(
-                `Documentation ${manifest.name} must be built after its latest source changes`,
+                `Documentation ${manifest.name} must be indexed after its latest source changes`,
             );
         }
 

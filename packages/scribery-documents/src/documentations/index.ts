@@ -1,17 +1,22 @@
 export { DocumentationService, type DocumentationServiceOptions } from "./documentation-service.js";
 export type {
     ActiveDocumentationBuild,
-    DocumentationBuildDiagnostic,
-    DocumentationBuildOptions,
-    DocumentationBuildProgress,
-    DocumentationBuildResult,
+    DirectoryDocumentationSource,
+    DocumentationAttributeValue,
+    DocumentationDirectoryInput,
     DocumentationInput,
+    DocumentationIndexDiagnostic,
+    DocumentationIndexOptions,
+    DocumentationIndexProgress,
+    DocumentationIndexResult,
     DocumentationManifest,
     DocumentationRetrievalRequest,
     DocumentationRetrievalScope,
-    DocumentationSource,
+    DocumentationSourceDefinition,
     DocumentationSummary,
     DeletedDocumentation,
+    IndexedDocumentationSource,
+    ManagedDocumentationSource,
     ResolvedDocumentationBuild,
     SourceTagMutation,
 } from "./contracts/documentation.js";
@@ -21,9 +26,10 @@ export {
 } from "./errors/documentation-error.js";
 export { DocumentationIndexer } from "./indexing/documentation-indexer.js";
 export {
-    ManagedDocumentationSourceProvider,
-    type ManagedDocumentationSourceRequest,
-} from "./sources/managed-documentation-source.js";
+    DocumentationSourceProvider,
+    type DocumentationSourceRequest,
+    type PreparedDocumentationSnapshot,
+} from "./sources/documentation-source.js";
 export { DocumentationCatalog } from "./managed/catalog.js";
 export {
     documentationDatabasePath,
