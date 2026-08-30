@@ -203,6 +203,7 @@ export class ScriberyTuiApp {
                     this.#transcript.addChild(component);
                     this.#transcript.addChild(new Spacer(1));
                     if (results.length > 0) this.#ui.setFocus(component);
+                    this.#ui.requestRender(true);
                 },
                 requestRender: () => this.#ui.requestRender(),
             },
