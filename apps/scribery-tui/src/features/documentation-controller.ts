@@ -20,7 +20,12 @@ export interface DocumentationUi {
     append(message: string, tone?: TranscriptTone): void;
     appendError(error: unknown): void;
     pick(title: string, items: readonly SelectItem[]): Promise<SelectItem | undefined>;
-    input(title: string, label: string, initialValue?: string): Promise<string | undefined>;
+    input(
+        title: string,
+        label: string,
+        initialValue?: string,
+        description?: string,
+    ): Promise<string | undefined>;
     confirm(title: string, defaultYes?: boolean): Promise<boolean>;
     showSearchResults(query: string, results: readonly RetrievalResult[]): void;
     requestRender(): void;
@@ -344,7 +349,13 @@ export class DocumentationController {
         const pathText = await this.#ui.input("Add directory", "Directory path");
         if (!pathText?.trim()) return;
         const root = resolve(this.#cwd, pathText.trim());
-        const mountPath = await this.#ui.input("Add directory", "Path inside documentation", basename(root));
+        const mountPath = await this.#ui.input(
+            "Add directory",
+            "Source namespace",
+            basename(root),
+            "A unique path prefix that keeps files from different sources " +
+                "from colliding within this documentation.",
+        );
         if (!mountPath?.trim()) return;
         const includeText = await this.#ui.input("Add directory", "Include globs (comma separated; empty means all)", "");
         if (includeText === undefined) return;

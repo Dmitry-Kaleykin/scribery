@@ -86,12 +86,13 @@ export class DialogHost {
         title: string,
         label: string,
         initialValue?: string,
+        description?: string,
     ): Promise<string | undefined> {
-        return this.#promptInput(title, label, initialValue, false);
+        return this.#promptInput(title, label, initialValue, false, description);
     }
 
     secretInput(title: string, label: string): Promise<string | undefined> {
-        return this.#promptInput(title, label, undefined, true);
+        return this.#promptInput(title, label, undefined, true, undefined);
     }
 
     async confirm(title: string, defaultYes = true): Promise<boolean> {
@@ -110,6 +111,7 @@ export class DialogHost {
         label: string,
         initialValue: string | undefined,
         maskInput: boolean,
+        description: string | undefined,
     ): Promise<string | undefined> {
         return new Promise((resolveInput) => {
             this.#active = true;
@@ -127,6 +129,7 @@ export class DialogHost {
             const prompt = new TextPrompt({
                 title,
                 label,
+                ...(description === undefined ? {} : { description }),
                 ...(initialValue === undefined ? {} : { initialValue }),
                 ...(maskInput ? { maskInput: true } : {}),
                 onSubmit: (value) => finish(value),

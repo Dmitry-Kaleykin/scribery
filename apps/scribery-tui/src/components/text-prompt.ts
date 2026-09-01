@@ -3,6 +3,7 @@ import {
     Key,
     matchesKey,
     truncateToWidth,
+    wrapTextWithAnsi,
     type Component,
     type Focusable,
 } from "@earendil-works/pi-tui";
@@ -12,6 +13,7 @@ import { colors } from "../theme.js";
 export interface TextPromptOptions {
     title: string;
     label?: string;
+    description?: string;
     initialValue?: string;
     maskInput?: boolean;
     onSubmit: (value: string) => void;
@@ -22,6 +24,7 @@ export interface TextPromptOptions {
 export class TextPrompt implements Component, Focusable {
     readonly #title: string;
     readonly #label: string;
+    readonly #description: string | undefined;
     readonly #input = new Input();
     readonly #onSubmit: (value: string) => void;
     readonly #onCancel: () => void;
@@ -32,6 +35,7 @@ export class TextPrompt implements Component, Focusable {
     constructor(options: TextPromptOptions) {
         this.#title = options.title;
         this.#label = options.label ?? ">";
+        this.#description = options.description;
         this.#onSubmit = options.onSubmit;
         this.#onCancel = options.onCancel;
         this.#requestRender = options.requestRender;
@@ -68,10 +72,18 @@ export class TextPrompt implements Component, Focusable {
         const renderedInput = this.#maskInput
             ? this.#renderMaskedInput(inputWidth)
             : this.#input.render(inputWidth)[0] ?? "";
+        const descriptionLines = this.#description === undefined
+            ? []
+            : wrapTextWithAnsi(
+                colors.muted(this.#description),
+                Math.max(1, width - 4),
+            ).map((descriptionLine) => `  ${descriptionLine}`);
         return [
             line,
             truncateToWidth(`  ${colors.bold(colors.accent(this.#title))}`, width),
             "",
+            ...descriptionLines,
+            ...(descriptionLines.length === 0 ? [] : [""]),
             truncateToWidth(`${label}${renderedInput}`, width),
             "",
             truncateToWidth(`  ${colors.muted("Enter confirm · Esc cancel")}`, width),

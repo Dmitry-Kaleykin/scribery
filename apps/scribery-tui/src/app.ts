@@ -190,8 +190,8 @@ export class ScriberyTuiApp {
                 append: (message, tone) => this.#append(message, tone),
                 appendError: (error) => this.#appendError(error),
                 pick: (title, items) => this.#dialogs.pick(title, items),
-                input: (title, label, initialValue) =>
-                    this.#dialogs.input(title, label, initialValue),
+                input: (title, label, initialValue, description) =>
+                    this.#dialogs.input(title, label, initialValue, description),
                 confirm: (title, defaultYes) => this.#dialogs.confirm(title, defaultYes),
                 showSearchResults: (query, results) => {
                     const component = new SearchResultsComponent({
