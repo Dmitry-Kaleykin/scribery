@@ -113,7 +113,7 @@ Usage:
 
 Available tools:
     list_projects, search_codebase, inspect_project_chunks,
-    list_documentations, list_documentation_sources, search_documentation
+    list_documentations, search_documentation, read_documentation_source
 
 Legacy --tools name:
     retrieval maps to search_codebase

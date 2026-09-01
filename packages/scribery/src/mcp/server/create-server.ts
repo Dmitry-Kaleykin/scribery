@@ -2,7 +2,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 
 import {
+    MCP_DEFAULT_DOCUMENTATION_SOURCE_CHARACTERS,
     MCP_DEFAULT_RESULT_LIMIT,
+    MCP_MAXIMUM_DOCUMENTATION_SOURCE_CHARACTERS,
     MCP_MAXIMUM_CHUNK_PAGE_SIZE,
     MCP_SERVER_NAME,
     READ_ONLY_TOOL_ANNOTATIONS,
@@ -20,6 +22,11 @@ const projectReference = z.string().trim().min(1).optional().describe(
 );
 const documentationReference = z.string().trim().min(1).describe(
     "Documentation name or identifier returned by list_documentations.",
+);
+const documentationSourceReference = z.string().trim().min(1).describe(
+    "Source identifier or documentation-relative path returned by " +
+    "search_documentation. To follow a file reference, resolve it to a " +
+    "documentation-relative path and pass that path here.",
 );
 const query = z.string().trim().min(1).describe(
     "Natural-language retrieval query.",
@@ -184,19 +191,41 @@ export function createScriberyMcpServer(
         },
     );
 
-    if (enabledTools.has("list_documentation_sources")) server.registerTool(
-        "list_documentation_sources",
+    if (enabledTools.has("read_documentation_source")) server.registerTool(
+        "read_documentation_source",
         {
-            title: "List documentation sources",
+            title: "Read a documentation source",
             description:
-                "List configured inputs and the current document titles, paths, " +
-                "media types, and tags for the specified documentation.",
-            inputSchema: z.object({ documentation: documentationReference }),
+                "Read the text of a source returned by search_documentation. " +
+                "Use this when an excerpt needs more context or references another " +
+                "file in the same documentation. Large sources are returned in " +
+                "character ranges that can be continued with nextStart.",
+            inputSchema: z.object({
+                documentation: documentationReference,
+                source: documentationSourceReference,
+                start: z.number().int().min(0).optional().describe(
+                    "Zero-based character position at which to start; defaults to 0.",
+                ),
+                maxCharacters: z.number().int().min(1)
+                    .max(MCP_MAXIMUM_DOCUMENTATION_SOURCE_CHARACTERS)
+                    .optional().describe(
+                        "Maximum characters returned; defaults to " +
+                        `${MCP_DEFAULT_DOCUMENTATION_SOURCE_CHARACTERS} and is capped at ` +
+                        `${MCP_MAXIMUM_DOCUMENTATION_SOURCE_CHARACTERS}.`,
+                    ),
+            }),
             annotations: READ_ONLY_TOOL_ANNOTATIONS,
         },
         async (input) => {
             try {
-                return mcpToolSuccess(await documentations.listSources(input.documentation));
+                return mcpToolSuccess(await documentations.readSource({
+                    documentationReference: input.documentation,
+                    sourceReference: input.source,
+                    ...(input.start === undefined ? {} : { start: input.start }),
+                    ...(input.maxCharacters === undefined
+                        ? {}
+                        : { maximumCharacters: input.maxCharacters }),
+                }));
             } catch (error: unknown) {
                 return mcpToolFailure(error);
             }
@@ -212,7 +241,9 @@ export function createScriberyMcpServer(
                 "references, manuals, specifications, guides, design documents, " +
                 "and other explanatory material. Call list_documentations first " +
                 "if you do not know which documentation to search. Returns ranked " +
-                "excerpts with source attribution and surrounding context.",
+                "excerpts with source attribution and surrounding context. Use " +
+                "read_documentation_source when an excerpt needs more context or " +
+                "points to another documentation file.",
             inputSchema: z.object({
                 query,
                 documentation: documentationReference,
@@ -285,7 +316,9 @@ function createMcpInstructions(enabledTools: ReadonlySet<string>): string {
         instructions.push(
             "Use search_documentation for separately managed documentation and " +
                 "reference material. If you do not know which documentation to " +
-                "search, call list_documentations first.",
+                "search, call list_documentations first. Use " +
+                "read_documentation_source to read source files or follow a " +
+                "documentation-relative file reference.",
         );
     }
 

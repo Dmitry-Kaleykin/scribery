@@ -48,3 +48,10 @@ export interface DocumentationSearchInput {
     rerank?: boolean;
     rerankCandidates?: number;
 }
+
+export interface DocumentationSourceReadInput {
+    documentationReference: string;
+    sourceReference: string;
+    start?: number;
+    maximumCharacters?: number;
+}

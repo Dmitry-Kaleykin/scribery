@@ -6,15 +6,20 @@ import {
 } from "scribery-documents";
 import {
     createOpenAiCompatibleRerankingProvider,
+    normalizeRelativePath,
     openAiCompatibleEmbeddingProviderFromBuild,
 } from "scribery-core";
 import {
     SqliteStorageProvider,
     type IndexBuildRecord,
 } from "scribery-core";
-import { MCP_DEFAULT_RESULT_LIMIT } from "../constants/defaults.js";
+import {
+    MCP_DEFAULT_DOCUMENTATION_SOURCE_CHARACTERS,
+    MCP_DEFAULT_RESULT_LIMIT,
+} from "../constants/defaults.js";
 import type {
     DocumentationSearchInput,
+    DocumentationSourceReadInput,
     ScriberyMcpServerOptions,
 } from "../contracts/server.js";
 
@@ -32,58 +37,94 @@ export class McpDocumentationService {
         return { count: documentations.length, documentations };
     }
 
-    async listSources(
-        documentationReference: string,
+    async readSource(
+        input: DocumentationSourceReadInput,
     ): Promise<Readonly<Record<string, unknown>>> {
-        const manifest = await this.#resolveManifest(documentationReference);
-        return {
-            documentationId: manifest.documentationId,
-            name: manifest.name,
-            sourceDefinitionCount: manifest.sourceDefinitions.length,
-            indexedSourceCount: manifest.activeBuild?.indexedSources.length ?? 0,
-            configurationRevision: manifest.configurationRevision,
-            indexedConfigurationRevision: manifest.activeBuild?.configurationRevision,
-            needsIndex: manifest.activeBuild?.configurationRevision !==
-                manifest.configurationRevision,
-            sourceDefinitions: manifest.sourceDefinitions,
-            indexedSources: manifest.activeBuild?.indexedSources ?? [],
-        };
+        const { manifest, build, databasePath } = await this.#resolveActiveBuild(
+            input.documentationReference,
+        );
+        const requestedSource = input.sourceReference.trim();
+        const indexedSources = manifest.activeBuild!.indexedSources;
+        let source = indexedSources.find(({ sourceId }) =>
+            sourceId === requestedSource
+        );
+
+        if (source === undefined) {
+            const logicalPath = normalizeRelativePath(requestedSource);
+            source = indexedSources.find(({ logicalPath: candidate }) =>
+                candidate === logicalPath
+            );
+        }
+
+        if (source === undefined) {
+            throw new Error(
+                `Documentation source ${requestedSource} was not found in ${manifest.name}`,
+            );
+        }
+
+        const storage = new SqliteStorageProvider(databasePath, {
+            readOnly: true,
+            immutable: true,
+        });
+
+        try {
+            const result = await storage.getDocumentChunks({
+                indexBuildId: build.indexBuildId,
+                path: source.logicalPath,
+            });
+
+            if (result === undefined) {
+                throw new Error(
+                    `Documentation source ${source.logicalPath} has no readable content ` +
+                    `in build ${build.indexBuildId}`,
+                );
+            }
+
+            const content = result.document.content;
+            const start = input.start ?? 0;
+
+            if (start > content.length) {
+                throw new Error(
+                    `Source start ${start} exceeds its ${content.length}-character length`,
+                );
+            }
+
+            const maximumCharacters = input.maximumCharacters ??
+                MCP_DEFAULT_DOCUMENTATION_SOURCE_CHARACTERS;
+            const end = Math.min(content.length, start + maximumCharacters);
+
+            return {
+                documentationId: manifest.documentationId,
+                name: manifest.name,
+                indexBuildId: build.indexBuildId,
+                sourceId: source.sourceId,
+                sourceDefinitionId: source.sourceDefinitionId,
+                path: source.logicalPath,
+                title: source.title,
+                ...(source.mediaType === undefined
+                    ? {}
+                    : { mediaType: source.mediaType }),
+                tags: source.tags,
+                attributes: source.attributes,
+                start,
+                end,
+                totalCharacters: content.length,
+                hasMore: end < content.length,
+                ...(end < content.length ? { nextStart: end } : {}),
+                content: content.slice(start, end),
+            };
+        } finally {
+            await storage.close();
+        }
     }
 
     async search(
         input: DocumentationSearchInput,
         signal?: AbortSignal,
     ): Promise<Readonly<Record<string, unknown>>> {
-        const manifest = await this.#resolveManifest(input.documentationReference);
-
-        if (
-            manifest.activeBuild === undefined ||
-            manifest.activeBuild.configurationRevision !== manifest.configurationRevision
-        ) {
-            throw new Error(
-                `Documentation ${manifest.name} must be indexed after its latest source changes`,
-            );
-        }
-
-        const databasePath = documentationDatabasePath(
-            this.#catalog.baseDirectory,
-            manifest.documentationId,
+        const { manifest, build } = await this.#resolveActiveBuild(
+            input.documentationReference,
         );
-        const storage = new SqliteStorageProvider(databasePath, {
-            readOnly: true,
-            immutable: true,
-        });
-        let build: IndexBuildRecord | undefined;
-
-        try {
-            build = await storage.getBuild(manifest.activeBuild.indexBuildId);
-        } finally {
-            await storage.close();
-        }
-
-        if (build === undefined || build.status !== "ready") {
-            throw new Error(`Active build for ${manifest.name} is not ready`);
-        }
 
         const providerOptions = this.#providerOptions();
         const embeddingProvider = openAiCompatibleEmbeddingProviderFromBuild(
@@ -162,6 +203,46 @@ export class McpDocumentationService {
         requestedReference: string,
     ): Promise<DocumentationManifest> {
         return this.#catalog.resolve(requestedReference);
+    }
+
+    async #resolveActiveBuild(
+        requestedReference: string,
+    ): Promise<{
+        manifest: DocumentationManifest;
+        build: IndexBuildRecord;
+        databasePath: string;
+    }> {
+        const manifest = await this.#resolveManifest(requestedReference);
+
+        if (
+            manifest.activeBuild === undefined ||
+            manifest.activeBuild.configurationRevision !== manifest.configurationRevision
+        ) {
+            throw new Error(
+                `Documentation ${manifest.name} must be indexed after its latest source changes`,
+            );
+        }
+
+        const databasePath = documentationDatabasePath(
+            this.#catalog.baseDirectory,
+            manifest.documentationId,
+        );
+        const storage = new SqliteStorageProvider(databasePath, {
+            readOnly: true,
+            immutable: true,
+        });
+
+        try {
+            const build = await storage.getBuild(manifest.activeBuild.indexBuildId);
+
+            if (build === undefined || build.status !== "ready") {
+                throw new Error(`Active build for ${manifest.name} is not ready`);
+            }
+
+            return { manifest, build, databasePath };
+        } finally {
+            await storage.close();
+        }
     }
 
     #providerOptions(): { baseUrl?: string; apiKey?: string } {

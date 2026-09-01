@@ -24,8 +24,8 @@ The first MCP surface intentionally contains only:
 - `search_codebase`;
 - `inspect_project_chunks`;
 - `list_documentations`;
-- `list_documentation_sources`;
-- `search_documentation`.
+- `search_documentation`;
+- `read_documentation_source`.
 
 Every tool is advertised as read-only, non-destructive, and idempotent. Project
 and documentation databases are opened in SQLite read-only immutable mode. The
@@ -37,7 +37,7 @@ this surface:
 ```sh
 scribery-mcp --project /path/to/project --tools search_codebase
 scribery-mcp --tools search_codebase,inspect_project_chunks
-scribery-mcp --tools list_documentations,search_documentation
+scribery-mcp --tools list_documentations,search_documentation,read_documentation_source
 ```
 
 The former allowlist name `retrieval` remains a compatibility alias for
@@ -70,7 +70,12 @@ configured, the server selects the only available project.
 
 Documentation selection is explicit. Call `list_documentations` to obtain a name
 or identifier, then pass it in the required `documentation` argument to
-`search_documentation` or `list_documentation_sources`.
+`search_documentation` or `read_documentation_source`. Search returns excerpts
+with source identifiers and documentation-relative paths. Pass either value as
+the read tool's `source` argument. File references found in a source can be
+followed by resolving them to another documentation-relative path and reading
+that path. Reads come from the active immutable build rather than the original
+file, and large sources are paginated by character range.
 
 Project search uses the project's active selection—a named target or a directly
 selected build—and re-reads that selection for every request. A CLI

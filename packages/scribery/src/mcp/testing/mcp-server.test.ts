@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { DeterministicFakeEmbeddingProvider } from "scribery-core";
+import { DocumentationService } from "scribery-documents";
 
 import {
     createScriberyMcpServer,
@@ -33,9 +35,9 @@ describe("Scribery MCP server", () => {
                 tools.map(({ name }) => name).sort(),
                 [
                     "inspect_project_chunks",
-                    "list_documentation_sources",
                     "list_documentations",
                     "list_projects",
+                    "read_documentation_source",
                     "search_codebase",
                     "search_documentation",
                 ],
@@ -118,7 +120,11 @@ describe("Scribery MCP server", () => {
             version: "test",
             indexesDirectory: join(directory, "indexes"),
             documentationsDirectory: join(directory, "documentations"),
-            toolAllowlist: ["list_documentations", "search_documentation"],
+            toolAllowlist: [
+                "list_documentations",
+                "search_documentation",
+                "read_documentation_source",
+            ],
         });
         const client = new Client({ name: "test-client", version: "test" });
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -130,14 +136,31 @@ describe("Scribery MCP server", () => {
             const { tools } = await client.listTools();
             assert.deepEqual(
                 tools.map(({ name }) => name),
-                ["list_documentations", "search_documentation"],
+                [
+                    "list_documentations",
+                    "read_documentation_source",
+                    "search_documentation",
+                ],
             );
-            const [list, search] = tools;
+            const [list, read, search] = tools;
             assert.equal(list?.title, "List documentation");
             assert.match(list?.description ?? "", /searched with search_documentation/u);
+            assert.equal(read?.title, "Read a documentation source");
+            assert.match(read?.description ?? "", /references another file/u);
+            assert.deepEqual(
+                read?.inputSchema.required,
+                ["documentation", "source"],
+            );
+            const sourceProperty = read?.inputSchema.properties
+                ?.source as { description?: string } | undefined;
+            assert.match(
+                sourceProperty?.description ?? "",
+                /documentation-relative path/u,
+            );
             assert.equal(search?.title, "Search documentation");
             assert.match(search?.description ?? "", /API references/u);
             assert.match(search?.description ?? "", /Call list_documentations first/u);
+            assert.match(search?.description ?? "", /read_documentation_source/u);
             assert.doesNotMatch(
                 search?.description ?? "",
                 /indexed|default documentation|only one documentation|current project/iu,
@@ -155,6 +178,80 @@ describe("Scribery MCP server", () => {
         } finally {
             await client.close();
             await server.close();
+        }
+    });
+
+    it("reads an active documentation source by path or source identifier", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "scribery-mcp-read-source-"));
+        const sourceRoot = join(directory, "source", "guides");
+        const documentationsDirectory = join(directory, "documentations");
+        const sourcePath = join(sourceRoot, "authentication.md");
+        const originalContent = "# Authentication\nUse signed session tokens.\n";
+        await mkdir(sourceRoot, { recursive: true });
+        await writeFile(sourcePath, originalContent, "utf8");
+
+        const documentationService = new DocumentationService({
+            embeddingProvider: new DeterministicFakeEmbeddingProvider(16),
+            documentationsDirectory,
+        });
+        const documentation = await documentationService.createDocumentation(
+            "Framework docs",
+        );
+        await documentationService.addDirectorySource(documentation.documentationId, {
+            root: sourceRoot,
+            mountPath: "guides",
+            include: ["**/*.md"],
+        });
+        await documentationService.indexDocumentation(documentation.documentationId);
+        const [indexedSource] = await documentationService.listIndexedSources(
+            documentation.documentationId,
+        );
+        assert.ok(indexedSource);
+
+        await writeFile(sourcePath, "Changed after the active build.\n", "utf8");
+
+        const server = createScriberyMcpServer({
+            version: "test",
+            documentationsDirectory,
+            toolAllowlist: ["read_documentation_source"],
+        });
+        const client = new Client({ name: "test-client", version: "test" });
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        await server.connect(serverTransport);
+        await client.connect(clientTransport);
+
+        try {
+            const byPath = await client.callTool({
+                name: "read_documentation_source",
+                arguments: {
+                    documentation: "Framework docs",
+                    source: "guides/authentication.md",
+                },
+            });
+            assert.equal(byPath.isError, undefined, textContent(byPath.content));
+            assert.equal(
+                (byPath.structuredContent as Record<string, unknown>).content,
+                originalContent,
+            );
+
+            const firstPage = await client.callTool({
+                name: "read_documentation_source",
+                arguments: {
+                    documentation: documentation.documentationId,
+                    source: indexedSource.sourceId,
+                    maxCharacters: 12,
+                },
+            });
+            const page = firstPage.structuredContent as Record<string, unknown>;
+            assert.equal(page.path, "guides/authentication.md");
+            assert.equal(page.content, originalContent.slice(0, 12));
+            assert.equal(page.hasMore, true);
+            assert.equal(page.nextStart, 12);
+            assert.equal(page.totalCharacters, originalContent.length);
+        } finally {
+            await client.close();
+            await server.close();
+            await rm(directory, { recursive: true, force: true });
         }
     });
 
