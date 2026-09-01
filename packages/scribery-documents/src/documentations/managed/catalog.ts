@@ -46,8 +46,12 @@ export class DocumentationCatalog {
         this.baseDirectory = baseDirectory;
     }
 
-    async create(name: string): Promise<DocumentationManifest> {
+    async create(
+        name: string,
+        description?: string,
+    ): Promise<DocumentationManifest> {
         const normalizedName = normalizeDocumentationName(name);
+        const normalizedDescription = normalizeDocumentationDescription(description);
         const documentationId = createDocumentationId(normalizedName.toLowerCase());
 
         if (await this.#readById(documentationId) !== undefined) {
@@ -63,6 +67,9 @@ export class DocumentationCatalog {
             schemaVersion: DOCUMENTATION_MANIFEST_VERSION,
             documentationId,
             name: normalizedName,
+            ...(normalizedDescription === undefined
+                ? {}
+                : { description: normalizedDescription }),
             createdAt: now,
             updatedAt: now,
             configurationRevision: 0,
@@ -117,6 +124,27 @@ export class DocumentationCatalog {
             }
         }
         return summaries.sort((left, right) => left.name.localeCompare(right.name));
+    }
+
+    async setDescription(
+        reference: string,
+        description?: string,
+    ): Promise<DocumentationManifest> {
+        const manifest = await this.resolve(reference);
+        const normalizedDescription = normalizeDocumentationDescription(description);
+        if (manifest.description === normalizedDescription) return manifest;
+
+        const updated: DocumentationManifest = {
+            ...manifest,
+            updatedAt: new Date().toISOString(),
+        };
+        if (normalizedDescription === undefined) {
+            delete updated.description;
+        } else {
+            updated.description = normalizedDescription;
+        }
+        await this.write(updated);
+        return updated;
     }
 
     async delete(reference: string): Promise<DeletedDocumentation> {
@@ -478,6 +506,9 @@ function summaryFrom(manifest: DocumentationManifest, baseDirectory: string): Do
     return {
         documentationId: manifest.documentationId,
         name: manifest.name,
+        ...(manifest.description === undefined
+            ? {}
+            : { description: manifest.description }),
         sourceDefinitionCount: manifest.sourceDefinitions.length,
         indexedSourceCount: manifest.activeBuild?.indexedSources.length ?? 0,
         configurationRevision: manifest.configurationRevision,
@@ -492,6 +523,7 @@ function isManifest(value: DocumentationManifest): boolean {
     return value?.schemaVersion === DOCUMENTATION_MANIFEST_VERSION &&
         typeof value.documentationId === "string" &&
         typeof value.name === "string" &&
+        (value.description === undefined || typeof value.description === "string") &&
         Number.isSafeInteger(value.configurationRevision) &&
         Array.isArray(value.sourceDefinitions) &&
         value.sourceDefinitions.every((source) =>
@@ -506,6 +538,21 @@ function normalizeDocumentationName(name: string): string {
     const normalized = requiredText(name, "documentation name");
     if (normalized.length > 100) {
         throw new DocumentationError("invalid-documentation", "Documentation name is too long");
+    }
+    return normalized;
+}
+
+function normalizeDocumentationDescription(
+    description: string | undefined,
+): string | undefined {
+    if (description === undefined) return undefined;
+    const normalized = description.trim().replace(/\s+/gu, " ");
+    if (normalized.length === 0) return undefined;
+    if (normalized.length > 1_000) {
+        throw new DocumentationError(
+            "invalid-documentation",
+            "Documentation description is too long",
+        );
     }
     return normalized;
 }

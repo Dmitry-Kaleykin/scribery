@@ -707,7 +707,8 @@ Chunks:
         [--json]
 
 Documentation:
-    scribery documentation create <name>
+    scribery documentation create <name> [--description <text>]
+    scribery documentation describe <documentation> <description>
     scribery documentation list
     scribery documentation delete <documentation>
     scribery source add <documentation> <file...> [--tag <tag>] [--encoding <encoding>]

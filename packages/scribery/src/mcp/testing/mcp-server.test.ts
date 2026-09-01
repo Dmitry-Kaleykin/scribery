@@ -63,7 +63,6 @@ describe("Scribery MCP server", () => {
                 arguments: {},
             });
             assert.deepEqual(documentations.structuredContent, {
-                count: 0,
                 documentations: [],
             });
 
@@ -173,7 +172,7 @@ describe("Scribery MCP server", () => {
                 ?.documentation as { description?: string } | undefined;
             assert.equal(
                 documentationProperty?.description,
-                "Documentation name or identifier returned by list_documentations.",
+                "Documentation name returned by list_documentations.",
             );
         } finally {
             await client.close();
@@ -196,6 +195,7 @@ describe("Scribery MCP server", () => {
         });
         const documentation = await documentationService.createDocumentation(
             "Framework docs",
+            "Authentication, routing, and deployment guides.",
         );
         await documentationService.addDirectorySource(documentation.documentationId, {
             root: sourceRoot,
@@ -213,7 +213,7 @@ describe("Scribery MCP server", () => {
         const server = createScriberyMcpServer({
             version: "test",
             documentationsDirectory,
-            toolAllowlist: ["read_documentation_source"],
+            toolAllowlist: ["list_documentations", "read_documentation_source"],
         });
         const client = new Client({ name: "test-client", version: "test" });
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -221,6 +221,17 @@ describe("Scribery MCP server", () => {
         await client.connect(clientTransport);
 
         try {
+            const listed = await client.callTool({
+                name: "list_documentations",
+                arguments: {},
+            });
+            assert.deepEqual(listed.structuredContent, {
+                documentations: [{
+                    name: "Framework docs",
+                    description: "Authentication, routing, and deployment guides.",
+                }],
+            });
+
             const byPath = await client.callTool({
                 name: "read_documentation_source",
                 arguments: {

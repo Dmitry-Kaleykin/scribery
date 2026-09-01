@@ -16,7 +16,14 @@ describe("DocumentationService", () => {
         const directory = await mkdtemp(join(tmpdir(), "scribery-documentation-"));
         try {
             const service = createService(directory);
-            const documentation = await service.createDocumentation("Personal notes");
+            const documentation = await service.createDocumentation(
+                "Personal notes",
+                "Authentication notes and implementation examples.",
+            );
+            assert.equal(
+                documentation.description,
+                "Authentication notes and implementation examples.",
+            );
             const configured = await service.upsertDocuments(documentation.documentationId, [
                 {
                     externalId: "note:authentication",
@@ -47,6 +54,29 @@ describe("DocumentationService", () => {
             assert.equal(firstIndex.sourceCount, 2);
             assert.equal(firstIndex.diagnostics.length, 0);
             assert.ok(firstIndex.indexedChunks > 2);
+
+            const described = await service.setDocumentationDescription(
+                documentation.documentationId,
+                "  Authentication, session, and code   notes.  ",
+            );
+            assert.equal(
+                described.description,
+                "Authentication, session, and code notes.",
+            );
+            assert.equal(
+                described.configurationRevision,
+                configured.configurationRevision,
+            );
+            assert.equal(
+                described.activeBuild?.indexBuildId,
+                firstIndex.indexBuildId,
+            );
+            const [describedSummary] = await service.listDocumentations();
+            assert.equal(
+                describedSummary?.description,
+                "Authentication, session, and code notes.",
+            );
+            assert.equal(describedSummary?.needsIndex, false);
 
             const sources = await service.listIndexedSources(documentation.documentationId);
             const note = sources.find(({ logicalPath }) => logicalPath === "notes/authentication.txt");
@@ -110,6 +140,18 @@ describe("DocumentationService", () => {
             assert.equal(secondIndex.sourceCount, 1);
             assert.equal(secondIndex.reusedDocuments, 1);
             assert.equal((await service.listDocumentations())[0]?.needsIndex, false);
+
+            const [beforeClear] = await service.listDocumentations();
+            const cleared = await service.setDocumentationDescription(
+                documentation.documentationId,
+                " ",
+            );
+            assert.equal(cleared.description, undefined);
+            assert.equal(
+                cleared.configurationRevision,
+                beforeClear?.configurationRevision,
+            );
+            assert.equal(cleared.activeBuild?.indexBuildId, secondIndex.indexBuildId);
 
             const deleted = await service.deleteDocumentation(documentation.documentationId);
             assert.equal(deleted.documentationId, documentation.documentationId);

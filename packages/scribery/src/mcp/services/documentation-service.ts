@@ -34,7 +34,12 @@ export class McpDocumentationService {
 
     async listDocumentations(): Promise<Readonly<Record<string, unknown>>> {
         const documentations = await this.#catalog.list();
-        return { count: documentations.length, documentations };
+        return {
+            documentations: documentations.map(({ name, description }) => ({
+                name,
+                description: description ?? "",
+            })),
+        };
     }
 
     async readSource(

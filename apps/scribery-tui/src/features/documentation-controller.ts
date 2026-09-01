@@ -77,16 +77,28 @@ export class DocumentationController {
             ...documentations.map((documentation) => ({
                 value: documentation.documentationId,
                 label: documentation.name,
-                description: `${documentation.sourceDefinitionCount} configured · ` +
+                description: [
+                    documentation.description,
+                    `${documentation.sourceDefinitionCount} configured · ` +
                     `${documentation.indexedSourceCount} indexed` +
                     (documentation.needsIndex ? " · index required" : ""),
+                ].filter(Boolean).join(" · "),
             })),
         ]);
         if (!selection) return;
         if (selection.value === "__create") {
             const name = (await this.#ui.input("Create documentation", "Name"))?.trim();
             if (!name) return;
-            const created = await service.createDocumentation(name);
+            const description = await this.#ui.input(
+                "Create documentation",
+                "Description (optional)",
+                "",
+            );
+            if (description === undefined) return;
+            const created = await service.createDocumentation(
+                name,
+                description.trim() || undefined,
+            );
             this.#ui.append(`Created documentation ${created.name}.`, "success");
             return;
         }
@@ -94,6 +106,11 @@ export class DocumentationController {
         const action = await this.#ui.pick(documentation.name, [
             { value: "search", label: "Search documentation" },
             { value: "index", label: "Index documentation", description: profileName },
+            {
+                value: "description",
+                label: "Edit description",
+                description: documentation.description ?? "No description",
+            },
             { value: "sources", label: "Configure sources", description: `${documentation.sourceDefinitionCount} configured` },
             { value: "indexed", label: "Browse indexed files", description: `${documentation.indexedSourceCount} files` },
             { value: "delete", label: "Delete documentation" },
@@ -103,6 +120,23 @@ export class DocumentationController {
             await this.#searchDocumentation(service, documentation);
         } else if (action.value === "index") {
             await this.#configureIndex(service, documentation, profileName);
+        } else if (action.value === "description") {
+            const description = await this.#ui.input(
+                `Describe ${documentation.name}`,
+                "Description (empty clears it)",
+                documentation.description ?? "",
+            );
+            if (description === undefined) return;
+            const updated = await service.setDocumentationDescription(
+                documentation.documentationId,
+                description.trim() || undefined,
+            );
+            this.#ui.append(
+                updated.description === undefined
+                    ? `Cleared the description for ${updated.name}.`
+                    : `Updated the description for ${updated.name}.`,
+                "success",
+            );
         } else if (action.value === "sources") {
             await this.#manageSources(service, documentation);
         } else if (action.value === "indexed") {

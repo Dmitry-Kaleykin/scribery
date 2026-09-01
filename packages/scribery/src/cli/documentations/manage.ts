@@ -22,11 +22,36 @@ export async function runDocumentationCommand(args: readonly string[]): Promise<
     const catalog = new DocumentationCatalog();
 
     if (operation === "create") {
-        if (operationArguments.length !== 1) {
+        const parsed = parseArgs({
+            args: operationArguments,
+            allowPositionals: true,
+            options: { description: { type: "string" } },
+        });
+        if (parsed.positionals.length !== 1) {
             throw new Error("documentation create requires exactly one name");
         }
         console.log(JSON.stringify(
-            await catalog.create(required(operationArguments[0], "documentation name")),
+            await catalog.create(
+                required(parsed.positionals[0], "documentation name"),
+                parsed.values.description,
+            ),
+            null,
+            2,
+        ));
+        return;
+    }
+
+    if (operation === "describe") {
+        if (operationArguments.length !== 2) {
+            throw new Error(
+                "documentation describe requires a documentation and description",
+            );
+        }
+        console.log(JSON.stringify(
+            await catalog.setDescription(
+                required(operationArguments[0], "documentation"),
+                operationArguments[1],
+            ),
             null,
             2,
         ));
@@ -58,7 +83,7 @@ export async function runDocumentationCommand(args: readonly string[]): Promise<
         return;
     }
 
-    throw new Error("documentation requires create, list, index, or delete");
+    throw new Error("documentation requires create, describe, list, index, or delete");
 }
 
 export async function runSourceCommand(args: readonly string[]): Promise<void> {

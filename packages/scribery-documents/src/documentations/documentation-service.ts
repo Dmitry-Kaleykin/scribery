@@ -37,12 +37,22 @@ export class DocumentationService {
         this.#rerankingProvider = options.rerankingProvider;
     }
 
-    createDocumentation(name: string): Promise<DocumentationManifest> {
-        return this.#catalog.create(name);
+    createDocumentation(
+        name: string,
+        description?: string,
+    ): Promise<DocumentationManifest> {
+        return this.#catalog.create(name, description);
     }
 
     listDocumentations(): Promise<readonly DocumentationSummary[]> {
         return this.#catalog.list();
+    }
+
+    setDocumentationDescription(
+        reference: string,
+        description?: string,
+    ): Promise<DocumentationManifest> {
+        return this.#catalog.setDescription(reference, description);
     }
 
     deleteDocumentation(reference: string): Promise<DeletedDocumentation> {

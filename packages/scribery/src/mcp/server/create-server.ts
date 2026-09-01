@@ -21,7 +21,7 @@ const projectReference = z.string().trim().min(1).optional().describe(
     "the project or only one project is available.",
 );
 const documentationReference = z.string().trim().min(1).describe(
-    "Documentation name or identifier returned by list_documentations.",
+    "Documentation name returned by list_documentations.",
 );
 const documentationSourceReference = z.string().trim().min(1).describe(
     "Source identifier or documentation-relative path returned by " +
@@ -177,8 +177,8 @@ export function createScriberyMcpServer(
             title: "List documentation",
             description:
                 "List the available documentation that can be searched with " +
-                "search_documentation. Returns each documentation's name, " +
-                "identifier, and source count.",
+                "search_documentation. Returns each documentation's name and " +
+                "description so you can choose the relevant one.",
             inputSchema: z.object({}),
             annotations: READ_ONLY_TOOL_ANNOTATIONS,
         },

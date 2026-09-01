@@ -71,6 +71,7 @@ export interface DocumentationManifest {
     schemaVersion: 2;
     documentationId: string;
     name: string;
+    description?: string;
     createdAt: string;
     updatedAt: string;
     configurationRevision: number;
@@ -150,6 +151,7 @@ export interface DocumentationIndexDiagnostic {
 export interface DocumentationSummary {
     documentationId: string;
     name: string;
+    description?: string;
     sourceDefinitionCount: number;
     indexedSourceCount: number;
     configurationRevision: number;

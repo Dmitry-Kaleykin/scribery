@@ -68,8 +68,9 @@ managed database path. `search_codebase` deliberately has no project or build
 selector: configure `--project` when starting the server. If no project is
 configured, the server selects the only available project.
 
-Documentation selection is explicit. Call `list_documentations` to obtain a name
-or identifier, then pass it in the required `documentation` argument to
+Documentation selection is explicit. Call `list_documentations` to compare the
+available names and descriptions, then pass the selected name in the required
+`documentation` argument to
 `search_documentation` or `read_documentation_source`. Search returns excerpts
 with source identifiers and documentation-relative paths. Pass either value as
 the read tool's `source` argument. File references found in a source can be
