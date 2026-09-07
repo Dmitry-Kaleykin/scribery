@@ -85,11 +85,23 @@ stored selection it falls back to the latest ready build for backward
 compatibility. File-chunk inspection can request another ready build. Search and
 chunk-inspection attribution includes the resolved selection and build identifier.
 
-Context expansion is enabled automatically for codebase search and uses one chunk
-before, one after, and up to 4,000 neighboring characters for each result. The
-tool returns 10 ranked excerpts by default and accepts only a query plus an
-optional result limit. File-chunk inspection is paginated and returns at most 100
-chunks per call.
+Context expansion is enabled automatically for codebase search. It is tuned to
+answer in one call: 6 ranked excerpts by default, each expanded with two chunks
+before, two after, and up to 6,000 neighboring characters. Every result prints its
+relevance, the line range it returned, and the enclosing declaration, so the caller
+can see what it already has instead of issuing a follow-up read to find out. The
+tool accepts only a query plus an optional result limit. Documentation search keeps
+the previous defaults: 10 excerpts, one chunk before, one after, and up to 4,000
+neighboring characters. File-chunk inspection stays paginated and returns at most
+100 chunks per call.
+
+An empty result and a failed search are reported differently. An empty result names
+the project that was searched, states that the search ran successfully, and suggests
+how to reword the query. A failure is labelled as a failure, gives the reason, and
+names the next command or setting to fix (`scribery index`, `scribery reindex`,
+`scribery retrieval switch`, the provider `--profile`/`--base-url`, or
+`OPENAI_COMPATIBLE_API_KEY`). Both outcomes are meant to produce another attempt,
+not abandonment.
 
 ## Cline configuration
 

@@ -2,6 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 
 import {
+    MCP_CODEBASE_CONTEXT_CHARACTERS,
+    MCP_CODEBASE_CONTEXT_CHUNKS_AFTER,
+    MCP_CODEBASE_CONTEXT_CHUNKS_BEFORE,
+    MCP_CODEBASE_RESULT_LIMIT,
     MCP_DEFAULT_DOCUMENTATION_SOURCE_CHARACTERS,
     MCP_DEFAULT_RESULT_LIMIT,
     MCP_MAXIMUM_DOCUMENTATION_SOURCE_CHARACTERS,
@@ -10,7 +14,10 @@ import {
     READ_ONLY_TOOL_ANNOTATIONS,
 } from "../constants/defaults.js";
 import type { ScriberyMcpServerOptions } from "../contracts/server.js";
-import { formatProjectSearchResult } from "../results/project-search-result.js";
+import {
+    formatProjectSearchResult,
+    projectSearchFailure,
+} from "../results/project-search-result.js";
 import { mcpToolFailure, mcpToolSuccess } from "../results/tool-result.js";
 import { McpDocumentationService } from "../services/documentation-service.js";
 import { McpProjectService } from "../services/project-service.js";
@@ -32,13 +39,14 @@ const query = z.string().trim().min(1).describe(
     "Natural-language retrieval query.",
 );
 const codebaseQuery = z.string().trim().min(1).describe(
-    "Describe the implementation, behavior, or concept to find.",
+    "Describe the implementation, behavior, or concept to find. Words that occur " +
+    "in the code help, but they are not required.",
 );
 const resultLimit = z.number().int().min(1).max(100).optional().describe(
     `Maximum returned matches; defaults to ${MCP_DEFAULT_RESULT_LIMIT}.`,
 );
 const codebaseResultLimit = z.number().int().min(1).max(100).optional().describe(
-    "Maximum number of code excerpts to return.",
+    `Maximum matches to return; defaults to ${MCP_CODEBASE_RESULT_LIMIT}.`,
 );
 const contextFields = {
     includeContext: z.boolean().optional().describe(
@@ -73,15 +81,26 @@ export function createScriberyMcpServer(
     );
     const projects = new McpProjectService(options);
     const documentations = new McpDocumentationService(options);
-    const executeProjectSearch = async (
-        input: Parameters<McpProjectService["search"]>[0],
+    const executeCodebaseSearch = async (
+        input: { query: string; limit?: number },
         signal: AbortSignal,
     ) => {
+        const limit = input.limit ?? MCP_CODEBASE_RESULT_LIMIT;
+
         try {
-            const result = await projects.search(input, signal);
-            return mcpToolSuccess(result, formatProjectSearchResult(result));
+            const result = await projects.search({
+                query: input.query,
+                limit,
+                contextBefore: MCP_CODEBASE_CONTEXT_CHUNKS_BEFORE,
+                contextAfter: MCP_CODEBASE_CONTEXT_CHUNKS_AFTER,
+                contextCharacters: MCP_CODEBASE_CONTEXT_CHARACTERS,
+            }, signal);
+            return mcpToolSuccess(
+                result,
+                formatProjectSearchResult(result, input.query, limit),
+            );
         } catch (error: unknown) {
-            return mcpToolFailure(error);
+            return projectSearchFailure(error);
         }
     };
 
@@ -108,13 +127,14 @@ export function createScriberyMcpServer(
             {
                 title: "Search the codebase",
                 description:
-                    "Search this project's source code and repository-local " +
-                    "documentation by meaning. " +
-                    "Use this first to locate implementations, understand behavior, " +
-                    "or find related code across files—even when a symbol or filename " +
-                    "is known. Call with only query; the project and current build are " +
-                    "already selected. Returns ranked excerpts with file paths, line " +
-                    "ranges, and surrounding context.",
+                    "Find where a behavior lives in this project's source by " +
+                    "describing it instead of naming it. Use it when you cannot " +
+                    "recall the identifier, file, or wording — or when you want " +
+                    "every place a concept appears gathered in one ranked pass. " +
+                    "Results carry file paths, the line ranges returned, enclosing " +
+                    "declarations, and surrounding source, so a follow-up call is " +
+                    "often unnecessary. Searches the project this server was started " +
+                    "with; an empty result names it and says how to reword.",
                 inputSchema: z.object({
                     query: codebaseQuery,
                     limit: codebaseResultLimit,
@@ -122,7 +142,7 @@ export function createScriberyMcpServer(
                 annotations: READ_ONLY_TOOL_ANNOTATIONS,
             },
             async (input, extra) =>
-                executeProjectSearch({
+                executeCodebaseSearch({
                     query: input.query,
                     ...(input.limit === undefined ? {} : { limit: input.limit }),
                 }, extra.signal),
@@ -306,9 +326,10 @@ function createMcpInstructions(enabledTools: ReadonlySet<string>): string {
 
     if (enabledTools.has("search_codebase")) {
         instructions.push(
-            "Use search_codebase first for questions about source-code behavior, " +
-                "architecture, or implementation in the current project. It needs " +
-                "only a query.",
+            "search_codebase answers questions about this project's source by " +
+                "meaning: describe the behavior or concept and it returns ranked " +
+                "excerpts with file paths and returned line ranges. It searches the " +
+                "project this server was started with.",
         );
     }
 

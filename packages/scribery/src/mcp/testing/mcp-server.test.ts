@@ -75,6 +75,10 @@ describe("Scribery MCP server", () => {
                 textContent(failedSearch.content),
                 /No indexed projects are available/u,
             );
+            assert.match(
+                textContent(failedSearch.content),
+                /this is not an empty result[\s\S]*Next: run `scribery index/iu,
+            );
         } finally {
             await client.close();
             await server.close();
@@ -100,7 +104,11 @@ describe("Scribery MCP server", () => {
             assert.deepEqual(tools.map(({ name }) => name), ["search_codebase"]);
             const [search] = tools;
             assert.equal(search?.title, "Search the codebase");
-            assert.match(search?.description ?? "", /Use this first/u);
+            assert.match(search?.description ?? "", /cannot recall the identifier/iu);
+            assert.doesNotMatch(
+                search?.description ?? "",
+                /use this first|even when|call with only|already selected/iu,
+            );
             assert.doesNotMatch(search?.description ?? "", /indexed|exact text/iu);
             assert.deepEqual(search?.inputSchema.required, ["query"]);
             assert.deepEqual(
