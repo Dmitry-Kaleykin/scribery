@@ -93,7 +93,7 @@ describe("indexing vertical slice", () => {
             vueDocument.chunks.map((_, index) => index),
         );
 
-        const retriever = new SemanticRetriever(storage, provider);
+        const retriever = new SemanticRetriever(storage, provider, undefined, undefined, { enabled: false });
         const phpResults = await retriever.retrieve({
             repositoryId: result.repositoryId,
             snapshotId: result.snapshotId,

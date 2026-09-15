@@ -113,7 +113,7 @@ describe("Scribery MCP server", () => {
             assert.deepEqual(search?.inputSchema.required, ["query"]);
             assert.deepEqual(
                 Object.keys(search?.inputSchema.properties ?? {}),
-                ["query", "limit"],
+                ["query", "limit", "compress"],
             );
         } finally {
             await client.close();

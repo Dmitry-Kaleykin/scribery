@@ -1,3 +1,4 @@
+import type { CompressionProvider, CompressionOptions } from "scribery-core";
 import type { EmbeddingProvider } from "scribery-core";
 import type { RerankingProvider } from "scribery-core";
 import { SemanticRetriever, type RetrievalResult } from "scribery-core";
@@ -23,15 +24,21 @@ import { documentationDatabasePath } from "./managed/paths.js";
 export interface DocumentationServiceOptions {
     embeddingProvider: EmbeddingProvider;
     rerankingProvider?: RerankingProvider;
+    compressionProvider?: CompressionProvider;
+    compression?: CompressionOptions;
     documentationsDirectory?: string;
 }
 
 export class DocumentationService {
+    readonly #compressionProvider: CompressionProvider | undefined;
+    readonly #compression: CompressionOptions | undefined;
     readonly #catalog: DocumentationCatalog;
     readonly #embeddingProvider: EmbeddingProvider;
     readonly #rerankingProvider: RerankingProvider | undefined;
 
     constructor(options: DocumentationServiceOptions) {
+        this.#compressionProvider = options.compressionProvider;
+        this.#compression = options.compression;
         this.#catalog = new DocumentationCatalog(options.documentationsDirectory);
         this.#embeddingProvider = options.embeddingProvider;
         this.#rerankingProvider = options.rerankingProvider;
@@ -232,11 +239,15 @@ export class DocumentationService {
                 storage,
                 this.#embeddingProvider,
                 this.#rerankingProvider,
+                this.#compressionProvider,
+                this.#compression,
             ).retrieve({
                 repositoryId: resolved.build.repositoryId,
                 snapshotId: resolved.build.snapshotId,
                 indexBuildId: resolved.build.indexBuildId,
                 query: request.query,
+                ...(request.compression === undefined ? {} : { compression: request.compression }),
+                ...(request.onDiagnostics === undefined ? {} : { onDiagnostics: request.onDiagnostics }),
                 ...(request.limit === undefined ? {} : { limit: request.limit }),
                 ...(request.context === undefined ? {} : { context: request.context }),
                 ...(request.rerank === undefined ? {} : { rerank: request.rerank }),

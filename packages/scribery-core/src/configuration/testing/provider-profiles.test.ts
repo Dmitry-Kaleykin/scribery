@@ -122,3 +122,21 @@ describe("provider profiles", () => {
         await assert.rejects(service.get("local-qwen"), /was not found/u);
     });
 });
+
+describe("compression profiles", () => {
+    it("persists model, endpoint, disable switch and budgets across updates and renames", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "compression-profile-"));
+        const service = new ProviderProfileService({ profilesPath: join(directory, "profiles.json") });
+        const profile = await service.set({ name: "extractor", embedding: {
+            provider: "openai-compatible", model: "embed", dimensions: 3,
+        }, compression: { model: "Qwen3.5-4B-4bit", baseUrl: "http://localhost:8000/v1", enabled: false, timeoutMs: 1000, maximumFiles: 2 } });
+        const renamed = await service.rename("extractor", "renamed");
+        assert.deepEqual(renamed.compression, profile.compression);
+        assert.deepEqual((await service.get("renamed")).compression, profile.compression);
+        await assert.rejects(service.set({ ...profile, compression: { timeoutMs: 31_000 } }), /timeoutMs/u);
+        await assert.rejects(service.set({ ...profile, compression: { model: " " } }), /model/u);
+        await assert.rejects(service.set({ ...profile, compression: { baseUrl: "file:///tmp/model" } }), /HTTP/u);
+        await assert.rejects(service.set({ ...profile, compression: { enabled: "false" } as never }), /boolean/u);
+        await assert.rejects(service.set({ ...profile, compression: { maximumFilse: 5 } as never }), /Unknown compression/u);
+    });
+});

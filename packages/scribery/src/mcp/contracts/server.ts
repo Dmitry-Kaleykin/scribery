@@ -1,7 +1,9 @@
+import type { CompressionProfile } from "scribery-core";
 import type { McpToolSelection } from "../constants/tools.js";
 
 export interface ScriberyMcpServerOptions {
     version: string;
+    compression?: CompressionProfile;
     defaultProjectReference?: string;
     baseUrl?: string;
     apiKey?: string | undefined;
@@ -19,6 +21,7 @@ export interface ProjectSearchInput {
     indexBuildId?: string;
     limit?: number;
     language?: string;
+    compress?: boolean;
     includeContext?: boolean;
     contextBefore?: number;
     contextAfter?: number;
@@ -41,6 +44,7 @@ export interface DocumentationSearchInput {
     sourceIds?: readonly string[];
     tags?: readonly string[];
     limit?: number;
+    compress?: boolean;
     includeContext?: boolean;
     contextBefore?: number;
     contextAfter?: number;

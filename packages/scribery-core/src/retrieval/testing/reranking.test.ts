@@ -80,7 +80,7 @@ describe("semantic retrieval reranking", () => {
         assert.ok(candidate.endsWith("Code:\nthis.cache.set(key, value);"));
     });
 
-    it("reranks over-fetched candidates before selecting and expanding context", async () => {
+    it("reranks over-fetched candidates before selecting results", async () => {
         const storage = new RetrievalFixtureStorage();
         const embeddingProvider = new StaticEmbeddingProvider();
         const retriever = new SemanticRetriever(
@@ -96,7 +96,7 @@ describe("semantic retrieval reranking", () => {
             filters: [{ field: "language", operator: "equals", value: "typescript" }],
             limit: 2,
             rerank: { candidateLimit: 3 },
-            context: {},
+            compression: { enabled: false },
         });
 
         assert.equal(storage.vectorRequest?.limit, 3);
@@ -107,7 +107,7 @@ describe("semantic retrieval reranking", () => {
         assert.deepEqual(results.map(({ score }) => score), [0.9, 0.8]);
         assert.deepEqual(results.map(({ semanticScore }) => semanticScore), [0.7, 0.8]);
         assert.deepEqual(results.map(({ rerankScore }) => rerankScore), [0.9, 0.8]);
-        assert.deepEqual(storage.neighborhoodAnchors, ["chunk-third", "chunk-second"]);
+        assert.deepEqual(storage.neighborhoodAnchors, []);
         assert.deepEqual(storage.vectorRequest?.filters, [
             { field: "language", operator: "equals", value: "typescript" },
         ]);
@@ -123,6 +123,7 @@ describe("semantic retrieval reranking", () => {
             storage,
             new StaticEmbeddingProvider(),
             new FailingFixtureReranker(),
+            undefined, { enabled: false },
         );
 
         await assert.rejects(
@@ -170,6 +171,7 @@ describe("semantic retrieval reranking", () => {
                 snapshotId: "snapshot",
                 indexBuildId: "build",
                 query: "find target",
+                compression: { enabled: false },
                 rerank: {},
             }),
             (error: unknown) =>

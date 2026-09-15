@@ -1,3 +1,4 @@
+import { compressionFlags, compressionFromFlags } from "../arguments/compression.js";
 import { parseArgs } from "node:util";
 
 import {
@@ -94,11 +95,24 @@ export async function runProfileCommand(args: readonly string[]): Promise<void> 
         return;
     }
 
+    if (action === "compression") {
+        const parsed = parseArgs({ args: actionArguments, allowPositionals: true, options: compressionFlags });
+        if (parsed.positionals.length !== 1) throw new Error("profile compression requires one profile name");
+        const current = await service.get(required(parsed.positionals[0], "profile"));
+        const updated = await service.set({ name: current.name, embedding: current.embedding,
+            ...(current.reranking === undefined ? {} : { reranking: current.reranking }),
+            compression: compressionFromFlags(parsed.values, current.compression),
+        });
+        console.log(JSON.stringify(updated, null, 2));
+        return;
+    }
+
     if (action === "set") {
         const parsed = parseArgs({
             args: actionArguments,
             allowPositionals: true,
             options: {
+                ...compressionFlags,
                 model: { type: "string" },
                 dimensions: { type: "string" },
                 "detect-dimensions": { type: "boolean" },
@@ -158,6 +172,7 @@ export async function runProfileCommand(args: readonly string[]): Promise<void> 
             );
         const input: ProviderProfileInput = {
             name: required(parsed.positionals[0], "profile"),
+            compression: compressionFromFlags(parsed.values),
             embedding: {
                 provider: "openai-compatible",
                 model,
@@ -202,7 +217,7 @@ export async function runProfileCommand(args: readonly string[]): Promise<void> 
     }
 
     throw new Error(
-        "profile requires one of: list, show, set, rename, test, models, inspect, delete",
+        "profile requires one of: list, show, set, compression, rename, test, models, inspect, delete",
     );
 }
 

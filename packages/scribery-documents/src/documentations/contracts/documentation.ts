@@ -1,3 +1,4 @@
+import type { CompressionOptions, RetrievalDiagnostics } from "scribery-core";
 import type { IndexBuildRecord, SupportedEncoding } from "scribery-core";
 import type {
     RetrievalContextOptions,
@@ -179,6 +180,8 @@ export interface DocumentationRetrievalRequest {
     scope?: DocumentationRetrievalScope;
     limit?: number;
     context?: RetrievalContextOptions;
+    compression?: CompressionOptions;
+    onDiagnostics?: (diagnostics: RetrievalDiagnostics) => void;
     rerank?: RetrievalRerankingOptions;
     signal?: AbortSignal;
 }

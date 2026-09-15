@@ -1,3 +1,4 @@
+export * from "./compression/index.js";
 export * from "./chunking/index.js";
 export * from "./classification/index.js";
 export * from "./configuration/index.js";

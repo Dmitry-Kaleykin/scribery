@@ -1,3 +1,4 @@
+import { compressionFlags, compressionFromFlags } from "../cli/arguments/compression.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { parseArgs } from "node:util";
 
@@ -13,6 +14,7 @@ export async function runScriberyMcpServer(
     const parsed = parseArgs({
         args,
         options: {
+            ...compressionFlags,
             project: { type: "string" },
             profile: { type: "string" },
             "base-url": { type: "string" },
@@ -64,6 +66,7 @@ export async function runScriberyMcpServer(
         parsed.values["rerank-instruction"];
     const options: ScriberyMcpServerOptions = {
         version,
+        compression: compressionFromFlags(parsed.values, profile?.compression, baseUrl),
         ...(parsed.values.project === undefined
             ? {}
             : { defaultProjectReference: requiredText(parsed.values.project, "--project") }),
@@ -108,6 +111,8 @@ Usage:
     scribery-mcp [--project <identifier-or-root>]
         [--profile <name>]
         [--base-url http://127.0.0.1:1234/v1] [--api-key <key>]
+        [--compression-model <id>] [--compression-base-url <url>]
+        [--compression-timeout <ms>] [--no-compression]
         [--rerank-model <id>]
         [--rerank-instruction <text>] [--tools <name[,name...]>]
 

@@ -1,10 +1,8 @@
+import { presentRetrievalResults } from "scribery-core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 
 import {
-    MCP_CODEBASE_CONTEXT_CHARACTERS,
-    MCP_CODEBASE_CONTEXT_CHUNKS_AFTER,
-    MCP_CODEBASE_CONTEXT_CHUNKS_BEFORE,
     MCP_CODEBASE_RESULT_LIMIT,
     MCP_DEFAULT_DOCUMENTATION_SOURCE_CHARACTERS,
     MCP_DEFAULT_RESULT_LIMIT,
@@ -49,17 +47,12 @@ const codebaseResultLimit = z.number().int().min(1).max(100).optional().describe
     `Maximum matches to return; defaults to ${MCP_CODEBASE_RESULT_LIMIT}.`,
 );
 const contextFields = {
+    compress: z.boolean().optional().describe("Select query-relevant passages; defaults to the server setting (enabled)."),
     includeContext: z.boolean().optional().describe(
-        "Include neighboring chunks; defaults to true.",
-    ),
-    contextBefore: z.number().int().min(0).max(20).optional().describe(
-        "Neighbor chunks before each match; defaults to 1.",
-    ),
-    contextAfter: z.number().int().min(0).max(20).optional().describe(
-        "Neighbor chunks after each match; defaults to 1.",
+        "Deprecated alias for compress.",
     ),
     contextCharacters: z.number().int().min(1).max(100_000).optional().describe(
-        "Combined neighboring-context character budget; defaults to 4000.",
+        "Maximum extracted characters per file; defaults to 12000.",
     ),
 };
 const rerankingFields = {
@@ -82,7 +75,7 @@ export function createScriberyMcpServer(
     const projects = new McpProjectService(options);
     const documentations = new McpDocumentationService(options);
     const executeCodebaseSearch = async (
-        input: { query: string; limit?: number },
+        input: { query: string; limit?: number; compress?: boolean },
         signal: AbortSignal,
     ) => {
         const limit = input.limit ?? MCP_CODEBASE_RESULT_LIMIT;
@@ -91,12 +84,11 @@ export function createScriberyMcpServer(
             const result = await projects.search({
                 query: input.query,
                 limit,
-                contextBefore: MCP_CODEBASE_CONTEXT_CHUNKS_BEFORE,
-                contextAfter: MCP_CODEBASE_CONTEXT_CHUNKS_AFTER,
-                contextCharacters: MCP_CODEBASE_CONTEXT_CHARACTERS,
+                ...(input.compress === undefined ? {} : { compress: input.compress }),
             }, signal);
+            const presented = presentRetrievalResults(result.results);
             return mcpToolSuccess(
-                result,
+                { ...result, results: presented, resultCount: presented.length, matchedChunkCount: result.resultCount },
                 formatProjectSearchResult(result, input.query, limit),
             );
         } catch (error: unknown) {
@@ -138,12 +130,14 @@ export function createScriberyMcpServer(
                 inputSchema: z.object({
                     query: codebaseQuery,
                     limit: codebaseResultLimit,
+                    compress: z.boolean().optional().describe("Select query-relevant source passages; defaults to the server setting (enabled). Set false for original matches."),
                 }),
                 annotations: READ_ONLY_TOOL_ANNOTATIONS,
             },
             async (input, extra) =>
                 executeCodebaseSearch({
                     query: input.query,
+                    ...(input.compress === undefined ? {} : { compress: input.compress }),
                     ...(input.limit === undefined ? {} : { limit: input.limit }),
                 }, extra.signal),
         );
@@ -289,15 +283,10 @@ export function createScriberyMcpServer(
                         : { sourceIds: input.sources }),
                     ...(input.tags === undefined ? {} : { tags: input.tags }),
                     ...(input.limit === undefined ? {} : { limit: input.limit }),
+                    ...(input.compress === undefined ? {} : { compress: input.compress }),
                     ...(input.includeContext === undefined
                         ? {}
                         : { includeContext: input.includeContext }),
-                    ...(input.contextBefore === undefined
-                        ? {}
-                        : { contextBefore: input.contextBefore }),
-                    ...(input.contextAfter === undefined
-                        ? {}
-                        : { contextAfter: input.contextAfter }),
                     ...(input.contextCharacters === undefined
                         ? {}
                         : { contextCharacters: input.contextCharacters }),

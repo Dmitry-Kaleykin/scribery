@@ -34,7 +34,10 @@ export function formatProjectSearchResult(
     const searchedProject = result.root ?? result.projectIdentifier;
 
     if (result.results.length === 0) {
-        return emptyResultText(query, searchedProject);
+        const empty = result.diagnostics?.compression.some((file) => file.status === "empty")
+            ? `Retrieval found candidate code for "${query}" in ${searchedProject}, but compression selected no relevant passages. Retry with compress: false to inspect the original matches.`
+            : emptyResultText(query, searchedProject);
+        return [empty, ...diagnosticLines(result)].join("\n\n");
     }
 
     return [
@@ -43,7 +46,8 @@ export function formatProjectSearchResult(
         } for "${query}".`,
         "Searched by meaning in " + searchedProject + ", best match first. Lines " +
         "marked Returned are already in this response.",
-        ...result.results.map((match, index) => formatMatch(match, index + 1)),
+        ...visibleMatches(result.results).map((match, index) => formatMatch(match, index + 1)),
+        ...diagnosticLines(result),
         ...footer(result, requestedLimit),
     ].join("\n\n");
 }
@@ -140,6 +144,17 @@ function footer(
 }
 
 function formatMatch(result: RetrievalResult, rank: number): string {
+    if (result.compression?.diagnostic.status === "selected") {
+        return [
+            `### ${rank}. ${result.path}`,
+            `Original best match: lines ${result.range.startLine}-${result.range.endLine}; relevance ${result.score.toFixed(2)}.`,
+            ...result.compression.excerpts.map((excerpt) => {
+                const fence = codeFence(excerpt.content);
+                return [`Returned: lines ${excerpt.range.startLine}-${excerpt.range.endLine}.`,
+                    `${fence}${fenceLanguage(result.language)}`, excerpt.content, fence].join("\n");
+            }),
+        ].join("\n");
+    }
     const content = joinedContent(result);
     const fence = codeFence(content);
     const location = result.range.startLine === result.range.endLine
@@ -155,6 +170,29 @@ function formatMatch(result: RetrievalResult, rank: number): string {
         content,
         fence,
     ].join("\n");
+}
+
+function visibleMatches(results: readonly RetrievalResult[]): readonly RetrievalResult[] {
+    const seen = new Set<string>();
+    return results.filter((result) => {
+        if (result.compression?.diagnostic.status !== "selected") return true;
+        const key = `${result.indexBuildId}\0${result.documentId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+function diagnosticLines(result: ProjectSearchResult): string[] {
+    const diagnostics = result.diagnostics;
+    if (diagnostics === undefined) return [];
+    return [
+        `Timing: retrieval ${diagnostics.retrievalMs} ms; reranking ${diagnostics.rerankingMs} ms; compression ${diagnostics.compressionMs} ms.`,
+        ...diagnostics.compression.flatMap((file) => file.status === "fallback"
+            ? [`Compression fallback for ${file.path}: ${file.reason}. Original matches returned.`]
+            : file.status === "empty" ? [`Compression selected no relevant passages in ${file.path}.`]
+                : file.inputTruncated ? [`Compression inspected bounded source sections in ${file.path}.`] : []),
+    ];
 }
 
 function returnedLinesLine(result: RetrievalResult): readonly string[] {

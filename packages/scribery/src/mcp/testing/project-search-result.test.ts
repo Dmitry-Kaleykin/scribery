@@ -198,3 +198,34 @@ function fixture(
         ...result,
     };
 }
+
+describe("compressed search result presentation", () => {
+    it("prints each file once with separate exact ranges and keeps original match scores labeled", () => {
+        const original = fixtureResult();
+        const compression = {
+            diagnostic: { documentId: original.documentId, path: original.path, status: "selected" as const, elapsedMs: 10 },
+            excerpts: [2, 20].map((line) => ({
+                documentId: original.documentId, fileRevisionId: "revision", path: original.path,
+                range: { startLine: line, endLine: line, startOffset: 0, endOffset: 10 }, content: `selected-${line}`,
+            })),
+        };
+        const text = formatProjectSearchResult(fixture({ results: [
+            { ...original, compression }, { ...original, chunkId: "other", compression },
+        ] }), "query", 10);
+        assert.equal(text.match(/### /gu)?.length, 1);
+        assert.match(text, /Returned: lines 2-2\./u);
+        assert.match(text, /Returned: lines 20-20\./u);
+        assert.doesNotMatch(text, /Returned: lines 2-20/u);
+        assert.match(text, /Original best match/u);
+        assert.doesNotMatch(text, /Relevance:/u);
+        assert.ok(!text.includes(original.content));
+    });
+    it("reports valid empty compression separately from a retrieval miss", () => {
+        const text = formatProjectSearchResult(fixture({ results: [], diagnostics: {
+            retrievalMs: 1, rerankingMs: 2, compressionMs: 3,
+            compression: [{ documentId: "doc", path: "a.ts", status: "empty", elapsedMs: 3 }],
+        } }), "query", 10);
+        assert.match(text, /Compression selected no relevant passages in a.ts/u);
+        assert.match(text, /compression 3 ms/u);
+    });
+});

@@ -379,7 +379,7 @@ export class ScriberyTuiApp {
                 projectReference: this.#activeProject.projectIdentifier,
                 profile,
                 limit: 10,
-                context: { beforeChunks: 1, afterChunks: 1, maximumCharacters: 12_000 },
+                compression: {},
                 reranking: { enabled: true, failureMode: "use-semantic-order" },
             }, this.#cwd);
             const component = new SearchResultsComponent({

@@ -1,3 +1,4 @@
+import type { CompressionOptions, RetrievalDiagnostics } from "scribery-core";
 import type {
     RetrievalContextOptions,
     RetrievalRerankingFailureMode,
@@ -21,6 +22,7 @@ export interface ProjectSearchRequest {
     limit?: number;
     language?: string;
     context?: RetrievalContextOptions;
+    compression?: CompressionOptions;
     reranking?: ProjectSearchRerankingOptions;
     signal?: AbortSignal;
 }
@@ -34,6 +36,7 @@ export interface ProjectSearchResult {
         type: "requested-build";
         indexBuildId: string;
     };
+    diagnostics?: RetrievalDiagnostics;
     resultCount: number;
     results: readonly RetrievalResult[];
 }

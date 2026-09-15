@@ -1,3 +1,4 @@
+import { OpenAiCompatibleCompressionProvider, presentRetrievalResults, type RetrievalDiagnostics } from "scribery-core";
 import {
     DocumentationCatalog,
     DocumentationService,
@@ -127,6 +128,9 @@ export class McpDocumentationService {
         input: DocumentationSearchInput,
         signal?: AbortSignal,
     ): Promise<Readonly<Record<string, unknown>>> {
+        if (input.contextBefore !== undefined || input.contextAfter !== undefined) {
+            throw new Error("Neighbor expansion has been replaced; use compress to control contextual compression");
+        }
         const { manifest, build } = await this.#resolveActiveBuild(
             input.documentationReference,
         );
@@ -150,13 +154,21 @@ export class McpDocumentationService {
             : undefined;
         const service = new DocumentationService({
             embeddingProvider,
+            compressionProvider: new OpenAiCompatibleCompressionProvider({ ...providerOptions, ...this.#options.compression }),
+            ...(this.#options.compression === undefined ? {} : { compression: this.#options.compression }),
             ...(rerankingProvider === undefined ? {} : { rerankingProvider }),
             ...(this.#options.documentationsDirectory === undefined
                 ? {}
                 : { documentationsDirectory: this.#options.documentationsDirectory }),
         });
+        let diagnostics: RetrievalDiagnostics | undefined;
         const results = await service.retrieve(manifest.documentationId, {
             query: input.query,
+            compression: {
+                ...(input.contextCharacters === undefined ? {} : { maximumExcerptCharacters: input.contextCharacters }),
+                ...((input.compress ?? input.includeContext) === undefined ? {} : { enabled: input.compress ?? input.includeContext }),
+            },
+            onDiagnostics: (value) => { diagnostics = value; },
             limit: input.limit ?? MCP_DEFAULT_RESULT_LIMIT,
             ...(input.sourceIds === undefined && input.tags === undefined
                 ? {}
@@ -166,21 +178,6 @@ export class McpDocumentationService {
                             ? {}
                             : { sourceIds: input.sourceIds }),
                         ...(input.tags === undefined ? {} : { tags: input.tags }),
-                    },
-                }),
-            ...(input.includeContext === false
-                ? {}
-                : {
-                    context: {
-                        ...(input.contextBefore === undefined
-                            ? {}
-                            : { beforeChunks: input.contextBefore }),
-                        ...(input.contextAfter === undefined
-                            ? {}
-                            : { afterChunks: input.contextAfter }),
-                        ...(input.contextCharacters === undefined
-                            ? {}
-                            : { maximumCharacters: input.contextCharacters }),
                     },
                 }),
             ...(rerankingProvider === undefined
@@ -195,12 +192,15 @@ export class McpDocumentationService {
             ...(signal === undefined ? {} : { signal }),
         });
 
+        const presented = presentRetrievalResults(results);
         return {
             documentationId: manifest.documentationId,
             name: manifest.name,
             indexBuildId: build.indexBuildId,
-            resultCount: results.length,
-            results,
+            ...(diagnostics === undefined ? {} : { diagnostics }),
+            resultCount: presented.length,
+            matchedChunkCount: results.length,
+            results: presented,
         };
     }
 

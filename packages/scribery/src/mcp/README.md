@@ -85,15 +85,13 @@ stored selection it falls back to the latest ready build for backward
 compatibility. File-chunk inspection can request another ready build. Search and
 chunk-inspection attribution includes the resolved selection and build identifier.
 
-Context expansion is enabled automatically for codebase search. It is tuned to
-answer in one call: 6 ranked excerpts by default, each expanded with two chunks
-before, two after, and up to 6,000 neighboring characters. Every result prints its
-relevance, the line range it returned, and the enclosing declaration, so the caller
-can see what it already has instead of issuing a follow-up read to find out. The
-tool accepts only a query plus an optional result limit. Documentation search keeps
-the previous defaults: 10 excerpts, one chunk before, one after, and up to 4,000
-neighboring characters. File-chunk inspection stays paginated and returns at most
-100 chunks per call.
+Contextual compression is enabled by default for codebase and documentation
+search. Codebase search retrieves 6 matches by default; documentation retrieves
+10. A configured local model selects exact source passages from distinct matched
+files, under one shared 30-second deadline. Successful files return separate
+excerpt ranges and original-match score metadata; failed files retain original
+matches with fallback diagnostics. `compress: false` disables extraction for one
+request. File-chunk inspection stays paginated, with at most 100 chunks per call.
 
 An empty result and a failed search are reported differently. An empty result names
 the project that was searched, states that the search ran successfully, and suggests
@@ -137,3 +135,11 @@ Cline runs inside a JetBrains GUI process managed outside an interactive shell:
 
 The configured provider and the build's embedding model must be running when a search tool is
 called. Listing and stored-chunk inspection do not require an embedding model.
+
+## Contextual compression
+
+Searches now select exact source excerpts with a configurable local model after
+reranking. Compression is enabled by default; `compress: false` returns original
+matches for one search. The server accepts `--compression-model`,
+`--compression-base-url`, and `--no-compression`, or saved profile settings.
+See [configuration and limits](../../../scribery-core/src/compression/README.md).

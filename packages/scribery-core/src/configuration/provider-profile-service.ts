@@ -1,3 +1,4 @@
+import { OpenAiCompatibleCompressionProvider } from "../compression/index.js";
 import {
     diagnoseEmbeddingProvider,
     OpenAiCompatibleEmbeddingProvider,
@@ -94,6 +95,15 @@ export class ProviderProfileService {
             ...(this.#apiKey === undefined ? {} : { apiKey: this.#apiKey }),
             ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
         } satisfies OpenAiCompatibleEmbeddingProviderOptions);
+    }
+
+    createCompressionProvider(profile: ProviderProfile) {
+        return new OpenAiCompatibleCompressionProvider({
+            ...(profile.embedding.baseUrl === undefined ? {} : { baseUrl: profile.embedding.baseUrl }),
+            ...profile.compression,
+            ...(this.#apiKey === undefined ? {} : { apiKey: this.#apiKey }),
+            ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
+        });
     }
 
     createRerankingProvider(profile: ProviderProfile) {

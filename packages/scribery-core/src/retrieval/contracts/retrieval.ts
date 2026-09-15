@@ -1,9 +1,11 @@
+import type { CompressionOptions, CompressionDiagnostic, CompressionExcerpt, RetrievalDiagnostics } from "../../compression/index.js";
 import type {
     ChunkSemanticContext,
     SourceRange,
 } from "../../metadata/index.js";
 import type { StorageFilterCondition } from "../../storage/index.js";
 
+/** @deprecated Neighbor expansion was replaced by CompressionOptions. */
 export interface RetrievalContextOptions {
     beforeChunks?: number;
     afterChunks?: number;
@@ -27,7 +29,10 @@ export interface RetrievalRequest {
     filters?: readonly StorageFilterCondition[];
     limit?: number;
     rerank?: RetrievalRerankingOptions;
+    /** @deprecated Rejected with a migration error; use compression. */
     context?: RetrievalContextOptions;
+    compression?: CompressionOptions;
+    onDiagnostics?: (diagnostics: RetrievalDiagnostics) => void;
     signal?: AbortSignal;
 }
 
@@ -65,4 +70,5 @@ export interface RetrievalResult {
     kind?: string;
     semanticContext?: ChunkSemanticContext;
     context?: RetrievalContext;
+    compression?: { diagnostic: CompressionDiagnostic; excerpts: readonly CompressionExcerpt[] };
 }

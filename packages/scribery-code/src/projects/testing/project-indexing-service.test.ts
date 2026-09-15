@@ -39,6 +39,7 @@ describe("project indexing service", () => {
                 dimensions: 3,
                 maximumInputs: 4,
             },
+            compression: { model: "fixture-extractor-4b", baseUrl: "http://localhost:9876/v1" },
             reranking: {
                 provider: "lm-studio-qwen3",
                 model: "fixture-reranker",
@@ -112,6 +113,13 @@ describe("project indexing service", () => {
         assert.equal(search.indexBuildId, second.result.indexBuildId);
         assert.equal(search.resultCount, 1);
         assert.equal(search.results[0]?.rerankScore, 1);
+        assert.equal(search.results[0]?.compression?.diagnostic.status, "selected");
+        assert.equal(search.diagnostics?.compression.length, 1);
+        const uncompressed = await new ProjectSearchService({ indexesDirectory, profilesPath, fetch }).search({
+            query: "version", projectReference: root, profile: "local-qwen", compression: { enabled: false }, limit: 1,
+        });
+        assert.equal(uncompressed.results[0]?.compression, undefined);
+        assert.deepEqual(uncompressed.diagnostics?.compression, []);
 
         const inspection = await new ProjectInspectionService({
             indexesDirectory,
@@ -126,6 +134,13 @@ describe("project indexing service", () => {
 
 function createEmbeddingFetch(): typeof globalThis.fetch {
     return async (input, init) => {
+        if (String(input).endsWith("/chat/completions")) {
+            assert.equal(String(input), "http://localhost:9876/v1/chat/completions");
+            assert.equal(JSON.parse(String(init?.body)).model, "fixture-extractor-4b");
+            return Response.json({ choices: [{ finish_reason: "stop", message: {
+                content: '{"ranges":[{"startLine":1,"endLine":1}]}',
+            } }] });
+        }
         if (String(input).endsWith("/completions")) {
             return Response.json({
                 choices: [{

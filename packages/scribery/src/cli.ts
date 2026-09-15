@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { compressionFlags, compressionFromFlags } from "./cli/arguments/compression.js";
+import { OpenAiCompatibleCompressionProvider, presentRetrievalResults, type RetrievalDiagnostics } from "scribery-core";
 
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
@@ -450,6 +452,7 @@ async function runSearch(args: readonly string[]): Promise<void> {
             "base-url": { type: "string" },
             limit: { type: "string" },
             language: { type: "string" },
+            ...compressionFlags,
             "context-before": { type: "string" },
             "context-after": { type: "string" },
             "context-characters": { type: "string" },
@@ -459,6 +462,9 @@ async function runSearch(args: readonly string[]): Promise<void> {
             "rerank-instruction": { type: "string" },
         },
     });
+    if (hasContextOptions(parsed.values)) {
+        throw new Error("Neighbor expansion has been replaced; use --compression-characters and --compression-input-tokens");
+    }
     const query = parsed.positionals.join(" ").trim();
     const profileName = parsed.values.profile;
     if (
@@ -554,12 +560,20 @@ async function runSearch(args: readonly string[]): Promise<void> {
                             parsed.values["rerank-instruction"],
                     }),
             });
+        const compression = compressionFromFlags(parsed.values, profile?.compression, baseUrl);
         const retriever = new SemanticRetriever(
             storage,
             provider,
             rerankingProvider,
+            new OpenAiCompatibleCompressionProvider({ ...compression,
+                apiKey: process.env.OPENAI_COMPATIBLE_API_KEY ?? process.env.LM_STUDIO_API_KEY,
+            }),
+            compression,
         );
+        let diagnostics: RetrievalDiagnostics | undefined;
         const results = await retriever.retrieve({
+            compression,
+            onDiagnostics: (value) => { diagnostics = value; },
             repositoryId: build.repositoryId,
             snapshotId: build.snapshotId,
             indexBuildId,
@@ -576,36 +590,6 @@ async function runSearch(args: readonly string[]): Promise<void> {
                         value: parsed.values.language,
                     }],
                 }),
-            ...(hasContextOptions(parsed.values)
-                ? {
-                    context: {
-                        ...(parsed.values["context-before"] === undefined
-                            ? {}
-                            : {
-                                beforeChunks: nonNegativeInteger(
-                                    parsed.values["context-before"],
-                                    "--context-before",
-                                ),
-                            }),
-                        ...(parsed.values["context-after"] === undefined
-                            ? {}
-                            : {
-                                afterChunks: nonNegativeInteger(
-                                    parsed.values["context-after"],
-                                    "--context-after",
-                                ),
-                            }),
-                        ...(parsed.values["context-characters"] === undefined
-                            ? {}
-                            : {
-                                maximumCharacters: positiveInteger(
-                                    parsed.values["context-characters"],
-                                    "--context-characters",
-                                ),
-                            }),
-                    },
-                }
-                : {}),
             ...(rerankingProvider === undefined
                 ? {}
                 : {
@@ -624,7 +608,7 @@ async function runSearch(args: readonly string[]): Promise<void> {
                     },
                 }),
         });
-        console.log(JSON.stringify(results, null, 2));
+        console.log(JSON.stringify({ results: presentRetrievalResults(results), diagnostics }, null, 2));
     } finally {
         await storage.close();
     }
@@ -677,6 +661,9 @@ Provider profiles:
         [--base-url http://127.0.0.1:1234/v1]
         [--embedding-suffix <text>] [--embedding-batch-size <n>]
         [--rerank-model <id>] [--rerank-instruction <text>]
+    scribery profile compression <name> [--compression-model <id>]
+        [--compression-base-url <url>] [--compression-timeout <ms>]
+        [--compression | --no-compression]
     scribery profile test <name>
     scribery profile rename <current-name> <new-name>
     scribery profile delete <name>
@@ -695,8 +682,10 @@ Search:
         [--project <identifier-or-root>] [--language <language>] [--limit <n>]
     scribery search <query> --db <file> --build <indexBuildId>
         [--profile <name>] [--language <language>] [--limit <n>]
-        [--context-before <n>] [--context-after <n>]
-        [--context-characters <n>]
+        [--compression-model <id>] [--compression-base-url <url>]
+        [--compression-timeout <ms>] [--compression-files <n>]
+        [--compression-input-tokens <n>] [--compression-output-tokens <n>]
+        [--compression-characters <n>] [--compression | --no-compression]
         [--rerank-model <id>] [--rerank-candidates <n>]
         [--rerank-instruction <text>] [--rerank-fallback]
 

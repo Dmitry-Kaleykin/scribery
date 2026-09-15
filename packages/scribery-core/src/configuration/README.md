@@ -107,3 +107,9 @@ The package root exports:
 The discovery service lists `/v1/models` and measures the actual vector returned
 by an embedding model. A UI can therefore present model selection and dimensions
 without duplicating OpenAI-compatible protocol logic.
+
+## Compression profiles
+
+Profiles also support default-on contextual compression with a configurable model,
+endpoint, disable switch, and budgets. See [compression configuration](../compression/README.md).
+Changing compression settings does not change the embedding/index recipe.

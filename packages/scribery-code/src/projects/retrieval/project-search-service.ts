@@ -1,3 +1,4 @@
+import { OpenAiCompatibleCompressionProvider, type RetrievalDiagnostics } from "scribery-core";
 import { ProviderProfileService } from "scribery-core";
 import {
     openAiCompatibleEmbeddingProviderFromBuild,
@@ -106,15 +107,23 @@ export class ProjectSearchService {
                     "Project search requested reranking without a configured reranking profile",
                 );
             }
+            let diagnostics: RetrievalDiagnostics | undefined;
             const results = await new SemanticRetriever(
                 storage,
                 embeddings,
                 reranking,
+                profile === undefined ? new OpenAiCompatibleCompressionProvider({
+                    ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
+                    ...(this.#apiKey === undefined ? {} : { apiKey: this.#apiKey }),
+                }) : this.#profiles.createCompressionProvider(profile),
+                profile?.compression,
             ).retrieve({
                 repositoryId: build.repositoryId,
                 snapshotId: build.snapshotId,
                 indexBuildId: build.indexBuildId,
                 query: request.query,
+                compression: request.compression ?? {},
+                onDiagnostics: (value) => { diagnostics = value; },
                 ...(request.limit === undefined
                     ? {}
                     : { limit: request.limit }),
@@ -158,6 +167,7 @@ export class ProjectSearchService {
                 databasePath: project.databasePath,
                 indexBuildId: build.indexBuildId,
                 retrievalSelection: selection,
+                ...(diagnostics === undefined ? {} : { diagnostics }),
                 resultCount: results.length,
                 results,
             };

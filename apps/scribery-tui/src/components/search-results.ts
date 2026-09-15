@@ -27,7 +27,13 @@ export class SearchResultsComponent implements Component {
 
     constructor(options: SearchResultsOptions) {
         this.#query = options.query;
-        this.#results = options.results;
+        const seen = new Set<string>();
+        this.#results = options.results.filter((result) => {
+            if (result.compression?.diagnostic.status !== "selected") return true;
+            if (seen.has(result.documentId)) return false;
+            seen.add(result.documentId);
+            return true;
+        });
         this.#onDone = options.onDone;
         this.#onOpen = options.onOpen;
         this.#requestRender = options.requestRender;
@@ -44,7 +50,10 @@ export class SearchResultsComponent implements Component {
             this.#expanded = !this.#expanded;
         } else if (data === "e" || data === "E") {
             const result = this.#results[this.#selected];
-            if (result) this.#onOpen?.(result);
+            if (result) {
+                const excerpt = result.compression?.excerpts[0];
+                this.#onOpen?.(excerpt === undefined ? result : { ...result, range: excerpt.range, content: excerpt.content });
+            }
         } else if (matchesKey(data, Key.escape)) {
             this.#onDone();
             return;
@@ -63,17 +72,26 @@ export class SearchResultsComponent implements Component {
         }
         for (const [index, result] of this.#results.entries()) {
             const selected = index === this.#selected;
-            const location = `${result.path}:${result.range.startLine}–${result.range.endLine}`;
+            const excerpts = result.compression?.diagnostic.status === "selected" ? result.compression.excerpts : undefined;
+            const location = excerpts === undefined
+                ? `${result.path}:${result.range.startLine}–${result.range.endLine}`
+                : `${result.path}:${excerpts.map(({ range }) => `${range.startLine}–${range.endLine}`).join(", ")}`;
             const score = result.score.toFixed(3);
             const prefix = selected ? colors.accent("›") : " ";
             const text = `${prefix} ${String(index + 1).padStart(2)}  ${location}  ${score}`;
             lines.push(truncateToWidth(selected ? colors.bold(text) : text, width));
             if (selected && this.#expanded) {
                 lines.push(colors.muted("  " + "─".repeat(Math.max(0, width - 2))));
-                for (const contentLine of result.content.split("\n").slice(0, 18)) {
+                const content = excerpts === undefined ? result.content : excerpts.map((excerpt) =>
+                    `Lines ${excerpt.range.startLine}–${excerpt.range.endLine}\n${excerpt.content}`
+                ).join("\n\n");
+                if (result.compression?.diagnostic.status === "fallback") {
+                    lines.push(colors.warning(`  Compression fallback: ${result.compression.diagnostic.reason}`));
+                }
+                for (const contentLine of content.split("\n").slice(0, 18)) {
                     lines.push(truncateToWidth(`  ${colors.dim("│")} ${contentLine}`, width));
                 }
-                if (result.content.split("\n").length > 18) {
+                if (content.split("\n").length > 18) {
                     lines.push(colors.muted("  … more content omitted"));
                 }
             }

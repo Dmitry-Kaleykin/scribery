@@ -32,7 +32,7 @@ The retrieval subsystem is responsible for:
 - removing duplicate results;
 - reranking candidates;
 - applying result diversity rules;
-- optionally expanding results with neighboring context;
+- selecting query-relevant source excerpts through contextual compression;
 - enforcing result and context limits;
 - returning source-attributed results;
 - reporting retrieval diagnostics.
@@ -69,7 +69,7 @@ request
   → deduplicate
   → rerank
   → diversify
-  → optionally expand context
+  → compress selected files
   → enforce limits
   → return attributed results
 ```
@@ -90,7 +90,7 @@ export interface RetrievalRequest {
     filters?: StorageFilterCondition[];
     limit?: number;
     rerank?: RetrievalRerankingOptions;
-    context?: RetrievalContextOptions;
+    compression?: CompressionOptions;
     signal?: AbortSignal;
 }
 ```
@@ -240,7 +240,7 @@ This provides enough candidates for:
 - deduplication;
 - reranking;
 - diversity;
-- context expansion.
+- contextual compression.
 
 Defaults should be configurable and bounded.
 
@@ -342,7 +342,7 @@ rerank: {
 The candidate limit defaults to five times the final result limit, capped at 100,
 and may not be smaller than the final limit. Storage over-fetches only this bounded
 set after applying exact build scope and hard metadata filters. Reranking selects
-the final result set before context expansion. A reranked result exposes its
+the final result set before contextual compression. A reranked result exposes its
 original `semanticScore`, provider `rerankScore`, and uses the rerank score as
 its final `score`.
 
@@ -371,52 +371,22 @@ construction.
 Hard-coded diversity rules should be avoided until retrieval quality can be
 evaluated.
 
-## Context expansion
+## Contextual compression
 
-A highly relevant chunk may require adjacent context, such as:
+Query-aware source selection replaces neighboring-chunk expansion and is enabled
+by default. After reranking, distinct matched documents are read from the exact
+index build and supplied to a configured instruction-following model. The model
+selects inclusive line ranges; Scribery validates them and returns exact source
+excerpts with their own attribution. Original chunk matches and scores remain
+available internally.
 
-- imports;
-- a containing class;
-- a neighboring type definition;
-- preceding documentation;
-- the next part of a large function.
+Compression has a shared 30-second deadline, one request at a time per process,
+bounded file/input/output budgets, and per-file fallback to original matches.
+Valid empty selections remain empty. It can be disabled in a provider profile or
+per request with `compression: { enabled: false }`.
 
-Context expansion may retrieve:
-
-- neighboring chunks;
-- parent-symbol chunks;
-- related declaration chunks.
-
-The current implementation supports neighboring cAST chunks. Callers opt in with:
-
-```ts
-context: {
-    beforeChunks?: number;       // default: 1
-    afterChunks?: number;        // default: 1
-    maximumCharacters?: number; // default: 4,000 per result
-}
-```
-
-The primary match is not merged or rewritten. Each returned match instead receives
-`context.before` and `context.after`, whose entries retain their chunk ID, source
-index, content, range, optional cAST kind, and available semantic sidecar. Chunks that are already primary
-matches in the same response are omitted from context. The character budget admits
-only complete chunks, starting with the nearest preceding and following chunks.
-Fetching parent declarations as additional source chunks and related-declaration
-expansion remain future strategies. JavaScript and TypeScript primary matches
-already retain their enclosing symbol chain and signatures as metadata; this is
-included in reranking input and result formatting without duplicating source.
-
-Expanded context must:
-
-- belong to the same requested snapshot;
-- belong to the same requested index build;
-- identify why it was included;
-- retain its own source attribution;
-- not be presented as an independently matched result;
-- respect the overall context budget.
-
-Context expansion should not silently cross document or version boundaries.
+See [configuration, provider requirements, budgets, and result contracts](../compression/README.md).
+The old `context` request field is deprecated and rejected with a migration error.
 
 ## Retrieval result
 
@@ -526,7 +496,7 @@ Tests should cover:
 - overlapping chunks;
 - reranker success and failure;
 - result diversity;
-- context expansion;
+- contextual compression, including invalid-range and timeout fallback;
 - cancellation and timeouts;
 - empty and extremely long queries;
 - deterministic ordering for tied scores.
@@ -547,7 +517,7 @@ The first implementation includes:
 - bounded candidate and result limits;
 - deterministic result ordering and deduplication;
 - exact path, range, and identity attribution;
-- optional, count- and character-bounded neighboring cAST context;
+- default-on, bounded contextual compression with per-file fallback;
 - JavaScript and TypeScript parent-symbol metadata in vector input, reranking,
   filters, and attributed results;
 - cancellation and structured diagnostics;
@@ -565,10 +535,10 @@ permission-policy integration are later work.
 
 - `contracts/` — explicitly scoped query and attributed-result contracts;
 - `constants/` — retrieval and context limits;
-- `context/` — neighboring-chunk selection and budget enforcement;
+- `../compression/` — provider, exact-source selection, deadlines, and budgets;
 - `reranking/` — retrieval-candidate formatting for the provider boundary;
 - `semantic-retriever.ts` — ready-build validation, query embedding, filtered
-  vector search, reranking, context expansion, and exact attribution;
+  vector search, reranking, contextual compression, and exact attribution;
 - `errors/` — structured scope and query failures.
 
 Lexical fusion, additional reranking providers, and context strategies can be

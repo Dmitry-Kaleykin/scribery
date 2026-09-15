@@ -1,3 +1,4 @@
+import type { CompressionProfile } from "../../compression/index.js";
 export interface OpenAiCompatibleEmbeddingProfile {
     /** `lm-studio` is accepted when reading profiles created before 1.1. */
     provider: "openai-compatible" | "lm-studio";
@@ -34,6 +35,7 @@ export type LmStudioRerankingProfile = OpenAiCompatibleQwen3RerankingProfile;
 export interface ProviderProfile {
     name: string;
     embedding: OpenAiCompatibleEmbeddingProfile;
+    compression?: CompressionProfile;
     reranking?: OpenAiCompatibleRerankingProfile;
     createdAt: string;
     updatedAt: string;
@@ -48,6 +50,7 @@ export interface ProviderProfiles {
 export interface ProviderProfileInput {
     name: string;
     embedding: OpenAiCompatibleEmbeddingProfile;
+    compression?: CompressionProfile;
     reranking?: OpenAiCompatibleRerankingProfile;
 }
 

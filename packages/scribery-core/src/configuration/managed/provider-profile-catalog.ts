@@ -1,3 +1,4 @@
+import { validateCompressionProfile, type CompressionProfile } from "../../compression/index.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -152,6 +153,7 @@ function validateCatalog(value: unknown): ProviderProfiles {
         const normalized = validateInput({
             name: profile.name,
             embedding: profile.embedding as OpenAiCompatibleEmbeddingProfile,
+            ...(profile.compression === undefined ? {} : { compression: profile.compression as CompressionProfile }),
             ...(profile.reranking === undefined
                 ? {}
                 : {
@@ -182,6 +184,7 @@ function validateInput(input: ProviderProfileInput): ProviderProfileInput {
     return {
         name: normalizeProviderProfileName(input.name),
         embedding,
+        ...(input.compression === undefined ? {} : { compression: validateCompressionProfile(input.compression) }),
         ...(reranking === undefined ? {} : { reranking }),
     };
 }

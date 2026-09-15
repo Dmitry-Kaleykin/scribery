@@ -1,3 +1,5 @@
+import { compressionFlags, compressionFromFlags } from "../arguments/compression.js";
+import { OpenAiCompatibleCompressionProvider, ProviderProfileService, presentRetrievalResults, type RetrievalDiagnostics } from "scribery-core";
 import { parseArgs } from "node:util";
 
 import {
@@ -11,7 +13,6 @@ import {
 } from "scribery-core";
 import { SqliteStorageProvider, type IndexBuildRecord } from "scribery-core";
 import {
-    nonNegativeInteger,
     positiveInteger,
 } from "../arguments/values.js";
 
@@ -28,7 +29,9 @@ export async function runDocumentationSearchIfRequested(
         args,
         allowPositionals: true,
         options: {
+            ...compressionFlags,
             documentation: { type: "string" },
+            profile: { type: "string" },
             source: { type: "string", multiple: true },
             tag: { type: "string", multiple: true },
             "base-url": { type: "string" },
@@ -44,13 +47,21 @@ export async function runDocumentationSearchIfRequested(
         },
     });
     const reference = parsed.values.documentation!;
+    if (hasContextOptions(parsed.values)) {
+        throw new Error("Neighbor expansion has been replaced; use --compression-characters and --compression-input-tokens");
+    }
     const query = parsed.positionals.join(" ").trim();
 
     if (parsed.values.language !== undefined) {
         throw new Error("--language is not yet supported with --documentation");
     }
+    const profileService = new ProviderProfileService({
+        apiKey: process.env.OPENAI_COMPATIBLE_API_KEY ?? process.env.LM_STUDIO_API_KEY,
+    });
+    const profile = parsed.values.profile === undefined ? undefined : await profileService.get(parsed.values.profile);
+    const baseUrl = parsed.values["base-url"] ?? profile?.embedding.baseUrl;
     if (
-        parsed.values["rerank-model"] === undefined &&
+        parsed.values["rerank-model"] === undefined && profile?.reranking === undefined &&
         hasRerankingOptions(parsed.values)
     ) {
         throw new Error("--rerank-model is required for reranking options");
@@ -78,17 +89,26 @@ export async function runDocumentationSearchIfRequested(
         throw new Error(`Active build for ${manifest.name} is not ready`);
     }
 
-    const provider = embeddingProviderFromBuild(build, parsed.values["base-url"]);
-    const rerankingProvider = createRerankingProvider(
+    const provider = embeddingProviderFromBuild(build, baseUrl);
+    const rerankingProvider = parsed.values["rerank-model"] === undefined && profile?.reranking !== undefined
+        ? profileService.createRerankingProvider(profile) : createRerankingProvider(
         parsed.values["rerank-model"],
-        parsed.values["base-url"],
+        baseUrl,
         parsed.values["rerank-instruction"],
     );
+    const compression = compressionFromFlags(parsed.values, profile?.compression, baseUrl);
     const service = new DocumentationService({
+        compressionProvider: new OpenAiCompatibleCompressionProvider({ ...compression,
+            apiKey: process.env.OPENAI_COMPATIBLE_API_KEY ?? process.env.LM_STUDIO_API_KEY,
+        }),
+        compression,
         embeddingProvider: provider,
         ...(rerankingProvider === undefined ? {} : { rerankingProvider }),
     });
+    let diagnostics: RetrievalDiagnostics | undefined;
     const results = await service.retrieve(reference, {
+        compression,
+        onDiagnostics: (value) => { diagnostics = value; },
         query,
         ...(parsed.values.limit === undefined
             ? {}
@@ -105,14 +125,11 @@ export async function runDocumentationSearchIfRequested(
                         : { tags: parsed.values.tag }),
                 },
             }),
-        ...(hasContextOptions(parsed.values)
-            ? { context: contextOptions(parsed.values) }
-            : {}),
         ...(rerankingProvider === undefined
             ? {}
             : { rerank: rerankingOptions(parsed.values) }),
     });
-    console.log(JSON.stringify(results, null, 2));
+    console.log(JSON.stringify({ results: presentRetrievalResults(results), diagnostics }, null, 2));
     return true;
 }
 
@@ -143,43 +160,6 @@ function createRerankingProvider(
                 : { apiKey: (process.env.OPENAI_COMPATIBLE_API_KEY ?? process.env.LM_STUDIO_API_KEY) }),
             ...(instruction === undefined ? {} : { instruction }),
         });
-}
-
-function contextOptions(values: {
-    "context-before"?: string;
-    "context-after"?: string;
-    "context-characters"?: string;
-}): {
-    beforeChunks?: number;
-    afterChunks?: number;
-    maximumCharacters?: number;
-} {
-    return {
-        ...(values["context-before"] === undefined
-            ? {}
-            : {
-                beforeChunks: nonNegativeInteger(
-                    values["context-before"],
-                    "--context-before",
-                ),
-            }),
-        ...(values["context-after"] === undefined
-            ? {}
-            : {
-                afterChunks: nonNegativeInteger(
-                    values["context-after"],
-                    "--context-after",
-                ),
-            }),
-        ...(values["context-characters"] === undefined
-            ? {}
-            : {
-                maximumCharacters: positiveInteger(
-                    values["context-characters"],
-                    "--context-characters",
-                ),
-            }),
-    };
 }
 
 function rerankingOptions(values: {

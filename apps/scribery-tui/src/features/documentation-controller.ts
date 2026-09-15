@@ -169,6 +169,8 @@ export class DocumentationController {
             profileName,
             service: new DocumentationService({
                 embeddingProvider: profileService.createEmbeddingProvider(profile),
+                compressionProvider: profileService.createCompressionProvider(profile),
+                ...(profile.compression === undefined ? {} : { compression: profile.compression }),
                 ...(rerankingProvider === undefined ? {} : { rerankingProvider }),
             }),
         };
@@ -184,7 +186,7 @@ export class DocumentationController {
         const results = await service.retrieve(documentation.documentationId, {
             query: normalized,
             limit: 10,
-            context: { beforeChunks: 1, afterChunks: 1, maximumCharacters: 12_000 },
+            compression: {},
             rerank: { candidateLimit: 30, failureMode: "use-semantic-order" },
         });
         this.#ui.showSearchResults(normalized, results);

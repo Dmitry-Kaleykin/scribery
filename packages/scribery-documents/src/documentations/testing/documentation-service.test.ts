@@ -268,6 +268,7 @@ describe("DocumentationService", () => {
 
 function createService(documentationsDirectory: string): DocumentationService {
     return new DocumentationService({
+        compression: { enabled: false },
         embeddingProvider: new DeterministicFakeEmbeddingProvider(16),
         documentationsDirectory,
     });

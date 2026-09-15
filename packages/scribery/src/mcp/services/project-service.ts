@@ -1,3 +1,4 @@
+import { OpenAiCompatibleCompressionProvider, type RetrievalDiagnostics } from "scribery-core";
 import { normalizeRelativePath } from "scribery-core";
 import {
     listIndexedProjects,
@@ -58,6 +59,9 @@ export class McpProjectService {
         input: ProjectSearchInput,
         signal?: AbortSignal,
     ): Promise<ProjectSearchResult> {
+        if (input.contextBefore !== undefined || input.contextAfter !== undefined) {
+            throw new Error("Neighbor expansion has been replaced; use compress to control contextual compression");
+        }
         const resolved = await this.#openBuild(
             input.projectReference,
             input.indexBuildId,
@@ -84,8 +88,16 @@ export class McpProjectService {
                 resolved.storage,
                 embeddingProvider,
                 rerankingProvider,
+                new OpenAiCompatibleCompressionProvider({ ...this.#providerOptions(), ...this.#options.compression }),
+                this.#options.compression,
             );
+            let diagnostics: RetrievalDiagnostics | undefined;
             const results = await retriever.retrieve({
+                compression: {
+                    ...(input.contextCharacters === undefined ? {} : { maximumExcerptCharacters: input.contextCharacters }),
+                    ...((input.compress ?? input.includeContext) === undefined ? {} : { enabled: input.compress ?? input.includeContext }),
+                },
+                onDiagnostics: (value) => { diagnostics = value; },
                 repositoryId: resolved.build.repositoryId,
                 snapshotId: resolved.build.snapshotId,
                 indexBuildId: resolved.build.indexBuildId,
@@ -99,21 +111,6 @@ export class McpProjectService {
                             operator: "equals" as const,
                             value: input.language,
                         }],
-                    }),
-                ...(input.includeContext === false
-                    ? {}
-                    : {
-                        context: {
-                            ...(input.contextBefore === undefined
-                                ? {}
-                                : { beforeChunks: input.contextBefore }),
-                            ...(input.contextAfter === undefined
-                                ? {}
-                                : { afterChunks: input.contextAfter }),
-                            ...(input.contextCharacters === undefined
-                                ? {}
-                                : { maximumCharacters: input.contextCharacters }),
-                        },
                     }),
                 ...(rerankingProvider === undefined
                     ? {}
@@ -135,6 +132,7 @@ export class McpProjectService {
                 databasePath: resolved.project.databasePath,
                 indexBuildId: resolved.build.indexBuildId,
                 retrievalSelection: resolved.selection,
+                ...(diagnostics === undefined ? {} : { diagnostics }),
                 resultCount: results.length,
                 results,
             };

@@ -1,3 +1,5 @@
+import { resolveCompressionOptions, type CompressionProvider, type CompressionOptions } from "../compression/index.js";
+import { compressResults } from "../compression/compress-results.js";
 import {
     EmbeddingService,
     formatQueryEmbeddingInput,
@@ -11,22 +13,12 @@ import {
 } from "../reranking/index.js";
 import type { StorageProvider } from "../storage/index.js";
 import {
-    DEFAULT_CONTEXT_CHUNKS_AFTER,
-    DEFAULT_CONTEXT_CHUNKS_BEFORE,
-    DEFAULT_MAXIMUM_CONTEXT_CHARACTERS,
     DEFAULT_RERANKING_CANDIDATE_MULTIPLIER,
     DEFAULT_RESULT_LIMIT,
-    MAXIMUM_CONTEXT_CHARACTERS,
-    MAXIMUM_CONTEXT_CHUNKS_PER_DIRECTION,
     MAXIMUM_RERANKING_CANDIDATES,
     MAXIMUM_RESULT_LIMIT,
 } from "./constants/limits.js";
-import {
-    expandResultContexts,
-    type ResolvedContextOptions,
-} from "./context/context-expander.js";
 import type {
-    RetrievalContextOptions,
     RetrievalRerankingOptions,
     RetrievalRequest,
     RetrievalResult,
@@ -40,6 +32,8 @@ interface ResolvedRerankingOptions {
 }
 
 export class SemanticRetriever {
+    readonly #compression: CompressionProvider | undefined;
+    readonly #compressionOptions: CompressionOptions;
     readonly #storage: StorageProvider;
     readonly #embeddings: EmbeddingService;
     readonly #reranking: RerankingService | undefined;
@@ -48,7 +42,11 @@ export class SemanticRetriever {
         storage: StorageProvider,
         provider: EmbeddingProvider,
         rerankingProvider?: RerankingProvider,
+        compressionProvider?: CompressionProvider,
+        compressionOptions: CompressionOptions = {},
     ) {
+        this.#compression = compressionProvider;
+        this.#compressionOptions = compressionOptions;
         this.#storage = storage;
         this.#embeddings = new EmbeddingService(provider);
         this.#reranking = rerankingProvider === undefined
@@ -59,7 +57,12 @@ export class SemanticRetriever {
     async retrieve(
         request: RetrievalRequest,
     ): Promise<readonly RetrievalResult[]> {
+        const started = performance.now();
         validateRequest(request);
+        const compression = resolveCompressionOptions({ ...this.#compressionOptions, ...request.compression });
+        if (compression.enabled && this.#compression === undefined) {
+            throw new RetrievalError("invalid-request", "Compression is enabled but no provider is configured; configure a compression model or set compression.enabled to false");
+        }
         const limit = request.limit ?? DEFAULT_RESULT_LIMIT;
         const rerankingOptions = request.rerank === undefined
             ? undefined
@@ -157,6 +160,8 @@ export class SemanticRetriever {
                 : { semanticContext: chunk.metadata.semanticContext }),
         }));
 
+        const retrievalMs = Math.round(performance.now() - started);
+        const rerankingStarted = performance.now();
         if (rerankingOptions !== undefined && retrievalResults.length > 0) {
             retrievalResults = await this.#rerank(
                 request,
@@ -166,16 +171,18 @@ export class SemanticRetriever {
             );
         }
 
-        if (request.context === undefined) {
-            return retrievalResults;
-        }
-
-        return expandResultContexts(
-            this.#storage,
-            request,
-            retrievalResults,
-            resolveContextOptions(request.context),
-        );
+        const rerankingMs = Math.round(performance.now() - rerankingStarted);
+        const compressionStarted = performance.now();
+        const compressed = compression.enabled
+            ? await compressResults(this.#storage, request, retrievalResults, this.#compression!, compression)
+            : { results: retrievalResults, diagnostics: [] };
+        request.onDiagnostics?.({
+            retrievalMs,
+            rerankingMs,
+            compressionMs: Math.round(performance.now() - compressionStarted),
+            compression: compressed.diagnostics,
+        });
+        return compressed.results;
     }
 
     async #rerank(
@@ -273,7 +280,7 @@ function validateRequest(request: RetrievalRequest): void {
     }
 
     if (request.context !== undefined) {
-        resolveContextOptions(request.context);
+        throw new RetrievalError("invalid-request", "Neighbor context expansion has been replaced by compression; use compression options instead of context");
     }
 
     if (request.rerank !== undefined) {
@@ -304,37 +311,6 @@ function resolveRerankingOptions(
     }
 
     return { candidateLimit, failureMode };
-}
-
-function resolveContextOptions(
-    options: RetrievalContextOptions,
-): ResolvedContextOptions {
-    const resolved = {
-        beforeChunks: options.beforeChunks ?? DEFAULT_CONTEXT_CHUNKS_BEFORE,
-        afterChunks: options.afterChunks ?? DEFAULT_CONTEXT_CHUNKS_AFTER,
-        maximumCharacters: options.maximumCharacters ??
-            DEFAULT_MAXIMUM_CONTEXT_CHARACTERS,
-    };
-
-    if (
-        !Number.isSafeInteger(resolved.beforeChunks) ||
-        resolved.beforeChunks < 0 ||
-        resolved.beforeChunks > MAXIMUM_CONTEXT_CHUNKS_PER_DIRECTION ||
-        !Number.isSafeInteger(resolved.afterChunks) ||
-        resolved.afterChunks < 0 ||
-        resolved.afterChunks > MAXIMUM_CONTEXT_CHUNKS_PER_DIRECTION ||
-        resolved.beforeChunks + resolved.afterChunks < 1 ||
-        !Number.isSafeInteger(resolved.maximumCharacters) ||
-        resolved.maximumCharacters < 1 ||
-        resolved.maximumCharacters > MAXIMUM_CONTEXT_CHARACTERS
-    ) {
-        throw new RetrievalError(
-            "invalid-request",
-            "Retrieval context contains an invalid chunk or character limit",
-        );
-    }
-
-    return resolved;
 }
 
 function resultKey(result: RetrievalResult): string {

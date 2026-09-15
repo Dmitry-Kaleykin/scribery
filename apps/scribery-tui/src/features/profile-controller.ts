@@ -394,8 +394,16 @@ export class ProfileController {
                 };
             }
         }
+        const compressionModel = await this.#pickProviderModel(
+            "Select compression model (None disables extraction)", models,
+            current?.compression?.enabled === false ? undefined : current?.compression?.model ?? "Qwen3.5-2B", true, "Disable compression",
+        );
+        if (compressionModel === undefined) return undefined;
         return {
             name,
+            compression: { ...current?.compression, enabled: compressionModel !== null,
+                ...(compressionModel === null ? {} : { model: compressionModel }),
+            },
             embedding: {
                 provider: "openai-compatible",
                 model: embeddingModel,
@@ -436,6 +444,7 @@ export class ProfileController {
         models: readonly OpenAiCompatibleModelSummary[],
         currentModel?: string,
         allowDisabled = false,
+        disabledLabel = "Disable reranking",
     ): Promise<string | null | undefined> {
         const unique = [...new Map(models.map((model) => [model.id, model])).values()];
         if (currentModel !== undefined && !unique.some(({ id }) => id === currentModel)) {
@@ -448,7 +457,7 @@ export class ProfileController {
         });
         const items: SelectItem[] = [];
         if (allowDisabled && currentModel === undefined) {
-            items.push({ value: "__disabled", label: "Disable reranking", description: "Current" });
+            items.push({ value: "__disabled", label: disabledLabel, description: "Current" });
         }
         unique.forEach((model, index) => {
             const description = [model.id === currentModel ? "Current" : undefined, model.ownedBy]
@@ -461,7 +470,7 @@ export class ProfileController {
             });
         });
         if (allowDisabled && currentModel !== undefined) {
-            items.push({ value: "__disabled", label: "Disable reranking" });
+            items.push({ value: "__disabled", label: disabledLabel });
         }
         items.push({ value: "__manual", label: "Enter model ID manually", description: "Use an ID absent from provider discovery" });
         const selection = await this.#ui.pick(title, items);
@@ -552,6 +561,7 @@ function editableProfile(profile: ProviderProfile): ProviderProfileInput {
     return {
         name: profile.name,
         embedding: { ...profile.embedding },
+        ...(profile.compression === undefined ? {} : { compression: { ...profile.compression } }),
         ...(profile.reranking === undefined ? {} : { reranking: { ...profile.reranking } }),
     };
 }
@@ -561,7 +571,7 @@ function requireEditedProfile(value: unknown, expectedName: string): ProviderPro
     if (!isRecord(value) || value.name !== expectedName) {
         throw new Error(`Edited profile name must remain ${expectedName}; use Rename to update references safely`);
     }
-    rejectUnknownKeys(value, ["name", "embedding", "reranking"], "profile");
+    rejectUnknownKeys(value, ["name", "embedding", "reranking", "compression"], "profile");
     if (isRecord(value.embedding)) {
         rejectUnknownKeys(
             value.embedding,
