@@ -1,3 +1,4 @@
+import { editProfileSettings } from "./profile-settings.js";
 import type { SelectItem } from "@earendil-works/pi-tui";
 import {
     ProviderProfileRenameService,
@@ -280,16 +281,27 @@ export class ProfileController {
     }
 
     async #editProfile(profile: ProviderProfile): Promise<void> {
-        const profileService = await this.#providerAccess.profileService(profile.name);
-        const configuration = await this.#promptProfileConfiguration(
-            `Edit ${profile.name}`,
-            profile.name,
-            profileService,
-            profile,
-        );
-        if (configuration === undefined) return;
-        await this.#profiles.set(configuration);
-        this.#ui.append(`Updated profile ${profile.name}.`, "success");
+        await editProfileSettings({
+            ui: this.#ui,
+            profiles: this.#profiles,
+            name: profile.name,
+            providerService: (name) => this.#providerAccess.profileService(name),
+            pickModel: async (current, kind) => {
+                const service = await this.#providerAccess.profileService(current.name);
+                const endpoint = current[kind]?.baseUrl ?? (kind === "compression" ? current.embedding.baseUrl : undefined);
+                const discovered = await this.#discoverProviderModels(service, endpoint, current);
+                const savedModel = current[kind]?.model;
+                const models = savedModel === undefined ? discovered : [...discovered, { id: savedModel }];
+                const selected = kind === "compression"
+                    ? current.compression?.enabled === false ? undefined : current.compression?.model ?? "Qwen3.5-2B"
+                    : current[kind]?.model;
+                return this.#pickProviderModel(
+                    `Select ${kind === "reranking" ? "reranker" : kind} model`,
+                    models, selected, kind !== "embedding",
+                    kind === "compression" ? "Disable compression" : "Disable reranking",
+                );
+            },
+        });
     }
 
     async #editProfileJson(profile: ProviderProfile): Promise<void> {

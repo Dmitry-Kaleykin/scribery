@@ -152,12 +152,12 @@ export class DocumentationController {
         }
     }
 
-    async #documentationService(): Promise<{
+    async #documentationService(requestedProfile?: string): Promise<{
         service: DocumentationServiceType;
         profileName: string;
     } | undefined> {
         const profiles = await this.#profiles.list();
-        const profileName = await this.#searchProfile() ?? profiles[0]?.name;
+        const profileName = requestedProfile ?? await this.#searchProfile() ?? profiles[0]?.name;
         if (!profileName) {
             this.#ui.append("Create a provider profile before using documentation.", "warning");
             return undefined;
@@ -211,11 +211,31 @@ export class DocumentationController {
             return;
         }
         const preferredPreset = this.#activePreference()?.preset;
-        const preset = presets.find(({ name }) => name === preferredPreset) ??
-            await this.#selectPresetValue(presets, "Select documentation indexing preset");
-        if (!preset) return;
-        if (!await this.#ui.confirm(`Index ${documentation.name} with ${profileName} · ${preset.name}?`)) return;
-        void this.#startIndex(service, documentation, preset);
+        let preset = presets.find(({ name }) => name === preferredPreset) ?? presets[0]!;
+        while (true) {
+            const action = await this.#ui.pick(`Index ${documentation.name}`, [
+                { value: "start", label: "Start indexing", description: `${profileName} · ${preset.name}` },
+                { value: "profile", label: "Change profile", description: profileName },
+                { value: "preset", label: "Change preset", description: preset.name },
+                { value: "cancel", label: "Cancel" },
+            ]);
+            if (action === undefined || action.value === "cancel") return;
+            if (action.value === "start") {
+                void this.#startIndex(service, documentation, preset);
+                return;
+            }
+            if (action.value === "preset") {
+                preset = await this.#selectPresetValue(presets, "Select documentation indexing preset") ?? preset;
+            } else if (action.value === "profile") {
+                const profiles = await this.#profiles.list();
+                const selected = await this.#ui.pick("Select documentation indexing profile", profiles.map((profile) => ({
+                    value: profile.name, label: profile.name, description: profile.name === profileName ? "Current" : profile.embedding.model,
+                })));
+                if (selected === undefined || selected.value === profileName) continue;
+                const updated = await this.#documentationService(selected.value);
+                if (updated !== undefined) { service = updated.service; profileName = updated.profileName; }
+            }
+        }
     }
 
     async #selectPresetValue(

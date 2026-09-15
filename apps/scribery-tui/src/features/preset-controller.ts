@@ -1,3 +1,4 @@
+import { editSettings } from "./settings-menu.js";
 import {
     type IndexingPreset,
     type IndexingPresetInput,
@@ -122,10 +123,47 @@ export class PresetController {
     }
 
     async #edit(preset: IndexingPreset): Promise<void> {
-        const configuration = await this.#promptConfiguration(`Edit ${preset.name}`, preset.name, preset);
-        if (configuration === undefined) return;
-        await this.#presets.set(configuration);
-        this.#ui.append(`Updated preset ${preset.name}.`, "success");
+        await editSettings({
+            ui: this.#ui,
+            title: `Edit ${preset.name}`,
+            read: () => this.#presets.get(preset.name),
+            save: (value) => this.#presets.set(value),
+            settings: (current) => [{
+                value: "profile", label: "Provider profile", description: current.providerProfile,
+                edit: async (value) => {
+                    const selected = await this.#pickProfile(await this.#profiles.list(), "Select provider profile", value.providerProfile);
+                    return selected === undefined ? undefined : { ...value, providerProfile: selected };
+                },
+            }, {
+                value: "chunk-size", label: "Maximum chunk size", description: String(current.maximumChunkSize ?? "3000 (default)"),
+                edit: async (value) => {
+                    const selected = await this.#ui.input(`Edit ${preset.name}`, "Maximum chunk size (empty uses default)", value.maximumChunkSize === undefined ? "" : String(value.maximumChunkSize));
+                    if (selected === undefined) return undefined;
+                    const { maximumChunkSize: _previous, ...rest } = value;
+                    return { ...rest, ...(selected.trim() ? { maximumChunkSize: parsePositiveInteger(selected, "Maximum chunk size") } : {}) };
+                },
+            }, ...(["include", "exclude"] as const).map((key) => ({
+                value: key, label: key === "include" ? "Include globs" : "Exclude globs",
+                description: current[key]?.join(", ") || (key === "include" ? "All files" : "None"),
+                edit: async (value: IndexingPreset) => {
+                    const selected = await this.#ui.input(`Edit ${preset.name}`, `${key === "include" ? "Include" : "Exclude"} globs (comma separated; empty clears them)`, value[key]?.join(", ") ?? "");
+                    if (selected === undefined) return undefined;
+                    const updated = { ...value };
+                    const patterns = splitPatterns(selected);
+                    if (patterns.length) updated[key] = patterns;
+                    else delete updated[key];
+                    return updated;
+                },
+            })), {
+                value: "windows1251", label: "Windows-1251 fallback", description: current.windows1251 === true ? "Enabled" : "Disabled",
+                edit: async (value) => {
+                    const selected = await this.#ui.pick("Windows-1251 fallback", [
+                        { value: "enabled", label: "Enabled" }, { value: "disabled", label: "Disabled" },
+                    ]);
+                    return selected === undefined ? undefined : { ...value, windows1251: selected.value === "enabled" };
+                },
+            }],
+        });
     }
 
     async #editJson(preset: IndexingPreset): Promise<void> {

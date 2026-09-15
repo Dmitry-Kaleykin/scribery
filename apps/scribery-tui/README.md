@@ -3,8 +3,26 @@
 Interactive terminal interface for Scribery. This is the maintained UI in the
 monorepo; the abandoned web UI is not part of Scribery.
 
-Provider profiles and indexing presets offer both guided editing and an
-advanced `Edit JSON` action. JSON editing uses `$VISUAL`, then `$EDITOR`, then
+Provider profiles and indexing presets use menus to edit individual settings.
+Run `/profile <name>` → **Edit profile** or `/preset <name>` → **Edit preset**,
+then select the field to change. Current values appear beside each setting;
+each valid change is saved immediately. Escape cancels the current edit or leaves
+the menu, without reverting previously saved changes. Invalid input leaves the
+stored value unchanged and returns to the menu.
+
+Profiles expose model pickers directly, with separate **Endpoints** and
+**Limits and timeouts** menus. Compression and reranking can be disabled from
+their model pickers. Changing a compression or reranker setting does not inspect
+the embedding model. Selecting a different embedding model detects its dimensions;
+the dimensions field also supports explicit values or `auto`.
+
+Presets expose profile, chunk size, include/exclude patterns, and encoding fallback
+individually. Documentation indexing shows profile and preset choices before
+starting, even when a preferred preset already exists. Manual and live indexing
+also offer independent configuration choices. Creating new profiles and presets
+still uses the guided setup.
+
+Both profiles and presets also offer an advanced `Edit JSON` action. JSON editing uses `$VISUAL`, then `$EDITOR`, then
 `micro`, with `nano` as the final fallback. Scribery validates the edited item
 before applying it atomically; names remain managed by the separate rename
 action, and profile API keys never appear in the temporary JSON file.
