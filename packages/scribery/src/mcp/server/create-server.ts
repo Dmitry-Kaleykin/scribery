@@ -37,14 +37,14 @@ const query = z.string().trim().min(1).describe(
     "Natural-language retrieval query.",
 );
 const codebaseQuery = z.string().trim().min(1).describe(
-    "Describe the implementation, behavior, or concept to find. Words that occur " +
-    "in the code help, but they are not required.",
+    "Describe the behavior or concept to locate; include known identifiers or " +
+    "domain terms when available. Example: 'failed webhook retries, sendWebhookAttempt'.",
 );
 const resultLimit = z.number().int().min(1).max(100).optional().describe(
     `Maximum returned matches; defaults to ${MCP_DEFAULT_RESULT_LIMIT}.`,
 );
 const codebaseResultLimit = z.number().int().min(1).max(100).optional().describe(
-    `Maximum matches to return; defaults to ${MCP_CODEBASE_RESULT_LIMIT}.`,
+    `Maximum candidate chunks to retrieve; defaults to ${MCP_CODEBASE_RESULT_LIMIT}. Selected passages from the same file may be grouped.`,
 );
 const contextFields = {
     compress: z.boolean().optional().describe("Select query-relevant passages; defaults to the server setting (enabled)."),
@@ -119,18 +119,16 @@ export function createScriberyMcpServer(
             {
                 title: "Search the codebase",
                 description:
-                    "Find where a behavior lives in this project's source by " +
-                    "describing it instead of naming it. Use it when you cannot " +
-                    "recall the identifier, file, or wording — or when you want " +
-                    "every place a concept appears gathered in one ranked pass. " +
-                    "Results carry file paths, the line ranges returned, enclosing " +
-                    "declarations, and surrounding source, so a follow-up call is " +
-                    "often unnecessary. Searches the project this server was started " +
-                    "with; an empty result names it and says how to reword.",
+                    "Find implementations related to a behavior or concept in this " +
+                    "project's indexed source. Use for questions such as 'where are " +
+                    "upload size limits enforced?' Include known identifiers or " +
+                    "domain terms to narrow the search. Returns ranked source " +
+                    "excerpts with file paths and line ranges. Use text search for " +
+                    "exact occurrences and filenames. Recent edits may not yet be indexed.",
                 inputSchema: z.object({
                     query: codebaseQuery,
                     limit: codebaseResultLimit,
-                    compress: z.boolean().optional().describe("Select query-relevant source passages; defaults to the server setting (enabled). Set false for original matches."),
+                    compress: z.boolean().optional().describe("Return selected verbatim source passages (enabled by default unless configured otherwise). Set false to return original matched chunks."),
                 }),
                 annotations: READ_ONLY_TOOL_ANNOTATIONS,
             },
@@ -317,8 +315,9 @@ function createMcpInstructions(enabledTools: ReadonlySet<string>): string {
         instructions.push(
             "search_codebase answers questions about this project's source by " +
                 "meaning: describe the behavior or concept and it returns ranked " +
-                "excerpts with file paths and returned line ranges. It searches the " +
-                "project this server was started with.",
+                "candidate excerpts with file paths and returned line ranges. " +
+                "It searches this project's selected index; recent edits may not " +
+                "yet be indexed. Use text search for exact occurrences and filenames.",
         );
     }
 

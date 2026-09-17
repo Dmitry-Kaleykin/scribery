@@ -47,7 +47,6 @@ describe("Scribery MCP server", () => {
                 annotations.destructiveHint === false &&
                 annotations.idempotentHint === true
             ));
-            assert.doesNotMatch(JSON.stringify(tools), /\bindexed\b/iu);
 
             const projects = await client.callTool({
                 name: "list_projects",
@@ -104,12 +103,14 @@ describe("Scribery MCP server", () => {
             assert.deepEqual(tools.map(({ name }) => name), ["search_codebase"]);
             const [search] = tools;
             assert.equal(search?.title, "Search the codebase");
-            assert.match(search?.description ?? "", /cannot recall the identifier/iu);
+            assert.match(search?.description ?? "", /project's indexed source/iu);
+            assert.match(search?.description ?? "", /where are upload size limits enforced/iu);
+            assert.match(search?.description ?? "", /Use text search for exact occurrences and filenames/iu);
+            assert.match(search?.description ?? "", /Recent edits may not yet be indexed/iu);
             assert.doesNotMatch(
                 search?.description ?? "",
-                /use this first|even when|call with only|already selected/iu,
+                /cannot recall|every place|instead of naming|says how to reword/iu,
             );
-            assert.doesNotMatch(search?.description ?? "", /indexed|exact text/iu);
             assert.deepEqual(search?.inputSchema.required, ["query"]);
             assert.deepEqual(
                 Object.keys(search?.inputSchema.properties ?? {}),

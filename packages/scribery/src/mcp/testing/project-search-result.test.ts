@@ -74,9 +74,9 @@ describe("MCP project search result formatting", () => {
 
         const text = formatProjectSearchResult(result, "session refresh", 6);
 
-        assert.match(text, /search_codebase found 1 match for "session refresh"\./u);
+        assert.match(text, /search_codebase returned 1 candidate for "session refresh"\./u);
         assert.match(text, /### 1\. src\/auth\/session\.ts:42-44/u);
-        assert.match(text, /Relevance: 0\.91/u);
+        assert.match(text, /Ranking score \(vector\): 0\.9100/u);
         assert.match(text, /Returned: lines 40-46\./u);
         assert.match(text, /Scope: class SessionService/u);
         assert.match(text, /Defines: method authenticate\(\): boolean/u);
@@ -84,7 +84,7 @@ describe("MCP project search result formatting", () => {
         assert.match(text, /````typescript/u);
         assert.match(text, /const session = readSession\(\);/u);
         assert.match(text, /export function authenticate/u);
-        assert.doesNotMatch(text, /Capped at/u);
+        assert.doesNotMatch(text, /Retrieval limit reached/u);
         assert.doesNotMatch(
             text,
             /repository-secret|snapshot-secret|build-secret|document-secret/u,
@@ -96,22 +96,58 @@ describe("MCP project search result formatting", () => {
 
         assert.match(
             formatProjectSearchResult(capped, "session", 1),
-            /Capped at 1 matches\. Pass a larger limit for more\./u,
+            /Retrieval limit reached \(1 candidate chunk\)[\s\S]*results are not exhaustive/u,
         );
     });
 
-    it("reports an empty result loudly and teaches a retry", () => {
+    it("scopes an empty result to the index without claiming code is absent", () => {
         const text = formatProjectSearchResult(
             fixture({ resultCount: 0, results: [] }),
             "upload retry",
             6,
         );
 
-        assert.match(text, /No matches for "upload retry" in \/project\./u);
-        assert.match(text, /ran successfully[\s\S]*not a tool failure/u);
-        assert.match(text, /Retry with different words:/u);
-        assert.match(text, /describe the behavior instead of the name/u);
-        assert.match(text, /search the working tree with your own text search/u);
+        assert.match(text, /No candidates returned for "upload retry" from the searched index for \/project\./u);
+        assert.match(text, /does not establish that the code is absent/u);
+        assert.match(text, /recent edits may not yet be indexed/u);
+        assert.match(text, /known identifiers or domain terms/u);
+        assert.match(text, /text search to check the working tree/u);
+    });
+
+    it("does not present weak or negative scores as verified relevance", () => {
+        const text = formatProjectSearchResult(fixture({ results: [
+            { ...fixtureResult(), score: 0.00001 },
+            { ...fixtureResult(), chunkId: "zero", score: 0, rerankScore: 0 },
+            { ...fixtureResult(), chunkId: "negative", score: -2 },
+        ] }), "unrelated concept", 6);
+
+        assert.match(text, /returned 3 candidates/u);
+        assert.match(text, /Candidates may be unrelated/u);
+        assert.match(text, /not verified relevance or confidence probabilities/u);
+        assert.match(text, /Ranking score \(vector\): 0\.00001000/u);
+        assert.match(text, /Ranking score \(reranker\): 0\.000/u);
+        assert.match(text, /Ranking score \(vector\): -2\.000/u);
+        assert.doesNotMatch(text, /found \d+ match|Relevance:/u);
+    });
+
+    it("labels failed passage selection beside the original candidate", () => {
+        const original = fixtureResult();
+        const text = formatProjectSearchResult(fixture({ results: [{
+            ...original,
+            score: 0.01,
+            rerankScore: 0.01,
+            compression: {
+                diagnostic: {
+                    documentId: original.documentId, path: original.path,
+                    status: "fallback", reason: "invalid-selection", elapsedMs: 1,
+                },
+                excerpts: [],
+            },
+        }] }), "unrelated concept", 6);
+
+        assert.match(text, /Passage selection failed \(invalid-selection\); showing the original candidate without relevance verification\./u);
+        assert.ok(text.indexOf("Passage selection failed") < text.indexOf(original.content));
+        assert.doesNotMatch(text, /found \d+ match|Relevance:/u);
     });
 
     it("keeps failures loud with a reason and the next command", () => {
@@ -184,7 +220,7 @@ function fixtureResult() {
 }
 
 function fixture(
-    result: Pick<ProjectSearchResult, "resultCount" | "results">,
+    result: Pick<ProjectSearchResult, "results"> & Partial<Pick<ProjectSearchResult, "resultCount" | "diagnostics">>,
 ): ProjectSearchResult {
     return {
         projectIdentifier: "project",
@@ -195,6 +231,7 @@ function fixture(
             type: "latest-ready",
             indexBuildId: "build",
         },
+        resultCount: result.results.length,
         ...result,
     };
 }
@@ -213,10 +250,11 @@ describe("compressed search result presentation", () => {
             { ...original, compression }, { ...original, chunkId: "other", compression },
         ] }), "query", 10);
         assert.equal(text.match(/### /gu)?.length, 1);
+        assert.match(text, /returned 1 candidate for "query"/u);
         assert.match(text, /Returned: lines 2-2\./u);
         assert.match(text, /Returned: lines 20-20\./u);
         assert.doesNotMatch(text, /Returned: lines 2-20/u);
-        assert.match(text, /Original best match/u);
+        assert.match(text, /Original highest-ranked chunk[\s\S]*Ranking score \(vector\)/u);
         assert.doesNotMatch(text, /Relevance:/u);
         assert.ok(!text.includes(original.content));
     });
@@ -226,6 +264,7 @@ describe("compressed search result presentation", () => {
             compression: [{ documentId: "doc", path: "a.ts", status: "empty", elapsedMs: 3 }],
         } }), "query", 10);
         assert.match(text, /Compression selected no relevant passages in a.ts/u);
+        assert.match(text, /No source passages selected[\s\S]*Retrieval returned candidates/u);
         assert.match(text, /compression 3 ms/u);
     });
 });

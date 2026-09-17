@@ -93,13 +93,20 @@ excerpt ranges and original-match score metadata; failed files retain original
 matches with fallback diagnostics. `compress: false` disables extraction for one
 request. File-chunk inspection stays paginated, with at most 100 chunks per call.
 
-An empty result and a failed search are reported differently. An empty result names
-the project that was searched, states that the search ran successfully, and suggests
-how to reword the query. A failure is labelled as a failure, gives the reason, and
+Codebase search presents ranked candidates, not verified matches. Scores are labeled
+by their source (vector or reranker) and are not confidence probabilities. No fixed
+score threshold is applied because scoring scales depend on the provider and metric.
+Compressed candidates from the same file are grouped, and the displayed count reflects
+those groups. Failed passage selection is labeled beside the original candidate.
+
+The tool description distinguishes semantic implementation discovery from exact text
+search and states that recent edits may not yet be indexed. An empty result is scoped
+to the searched index; it does not establish that the code is absent. If compression
+selected no passages, the response distinguishes this from retrieval returning no
+candidates. A failure is labelled as a failure, gives the reason, and
 names the next command or setting to fix (`scribery index`, `scribery reindex`,
 `scribery retrieval switch`, the provider `--profile`/`--base-url`, or
-`OPENAI_COMPATIBLE_API_KEY`). Both outcomes are meant to produce another attempt,
-not abandonment.
+`OPENAI_COMPATIBLE_API_KEY`).
 
 ## Cline configuration
 

@@ -35,18 +35,21 @@ export function formatProjectSearchResult(
 
     if (result.results.length === 0) {
         const empty = result.diagnostics?.compression.some((file) => file.status === "empty")
-            ? `Retrieval found candidate code for "${query}" in ${searchedProject}, but compression selected no relevant passages. Retry with compress: false to inspect the original matches.`
+            ? `No source passages selected for "${query}" in the searched index for ${searchedProject}. Retrieval returned candidates, but compression selected no relevant passages. Use compress: false to inspect the original candidates, or text search to check the working tree.`
             : emptyResultText(query, searchedProject);
         return [empty, ...diagnosticLines(result)].join("\n\n");
     }
 
+    const candidates = visibleMatches(result.results);
     return [
-        `search_codebase found ${result.results.length} match${
-            result.results.length === 1 ? "" : "es"
+        `search_codebase returned ${candidates.length} candidate${
+            candidates.length === 1 ? "" : "s"
         } for "${query}".`,
-        "Searched by meaning in " + searchedProject + ", best match first. Lines " +
-        "marked Returned are already in this response.",
-        ...visibleMatches(result.results).map((match, index) => formatMatch(match, index + 1)),
+        "Searched indexed source in " + searchedProject + ", highest-ranked first. " +
+        "Candidates may be unrelated; scores indicate ranking, not verified relevance " +
+        "or confidence probabilities. Recent edits may not yet be indexed. " +
+        "Lines marked Returned are already in this response.",
+        ...candidates.map((match, index) => formatMatch(match, index + 1)),
         ...diagnosticLines(result),
         ...footer(result, requestedLimit),
     ].join("\n\n");
@@ -119,18 +122,10 @@ export function formatProjectSearchGuidance(error: unknown): string {
 
 function emptyResultText(query: string, searchedProject: string): string {
     return [
-        `No matches for "${query}" in ${searchedProject}.`,
-        "search_codebase ran successfully: this wording did not match, which is a " +
-        "normal result and not a tool failure.",
-        [
-            "Retry with different words:",
-            "- describe the behavior instead of the name (\"where uploads are " +
-            "retried\", \"what happens when a token expires\");",
-            "- try a synonym, the abbreviation the code uses, a directory, a file " +
-            "type, or the language name;",
-            "- if you already know the identifier or filename, search the working " +
-            "tree with your own text search instead.",
-        ].join("\n"),
+        `No candidates returned for "${query}" from the searched index for ${searchedProject}.`,
+        "This does not establish that the code is absent; recent edits may not yet " +
+        "be indexed. Try another description with known identifiers or domain " +
+        "terms, or use text search to check the working tree.",
     ].join("\n\n");
 }
 
@@ -140,14 +135,14 @@ function footer(
 ): readonly string[] {
     return result.results.length < requestedLimit
         ? []
-        : [`Capped at ${requestedLimit} matches. Pass a larger limit for more.`];
+        : [`Retrieval limit reached (${requestedLimit} candidate chunk${requestedLimit === 1 ? "" : "s"}). Increase limit to request more; results are not exhaustive.`];
 }
 
 function formatMatch(result: RetrievalResult, rank: number): string {
     if (result.compression?.diagnostic.status === "selected") {
         return [
             `### ${rank}. ${result.path}`,
-            `Original best match: lines ${result.range.startLine}-${result.range.endLine}; relevance ${result.score.toFixed(2)}.`,
+            `Original highest-ranked chunk: lines ${result.range.startLine}-${result.range.endLine}; ${rankingScore(result)}.`,
             ...result.compression.excerpts.map((excerpt) => {
                 const fence = codeFence(excerpt.content);
                 return [`Returned: lines ${excerpt.range.startLine}-${excerpt.range.endLine}.`,
@@ -163,13 +158,21 @@ function formatMatch(result: RetrievalResult, rank: number): string {
 
     return [
         `### ${rank}. ${location}`,
-        `Relevance: ${result.score.toFixed(2)}`,
+        rankingScore(result),
+        ...(result.compression?.diagnostic.status === "fallback"
+            ? [`Passage selection failed (${result.compression.diagnostic.reason ?? "unknown reason"}); showing the original candidate without relevance verification.`]
+            : []),
         ...returnedLinesLine(result),
         ...semanticContextLines(result),
         `${fence}${fenceLanguage(result.language)}`,
         content,
         fence,
     ].join("\n");
+}
+
+function rankingScore(result: RetrievalResult): string {
+    const source = result.rerankScore === undefined ? "vector" : "reranker";
+    return `Ranking score (${source}): ${result.score.toPrecision(4)}`;
 }
 
 function visibleMatches(results: readonly RetrievalResult[]): readonly RetrievalResult[] {
