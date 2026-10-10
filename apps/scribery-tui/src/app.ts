@@ -251,6 +251,7 @@ export class ScriberyTuiApp {
             preferences: this.#preferences,
             profiles: this.#profiles,
             presets: this.#presets,
+            targets: this.#targets,
             profileController: this.#profileController,
             pickPreset: (presets, title) => this.#presetController.pick(presets, title),
             activeProject: () => this.#activeProject,
@@ -339,7 +340,7 @@ export class ScriberyTuiApp {
 
     async #runCommand(name: string, argument: string): Promise<void> {
         switch (name) {
-            case "index": await this.#projectIndexing.configureAndStart(); break;
+            case "index": await this.#projectIndexing.configureAndStart(argument); break;
             case "live": await this.#liveIndexing.manage(argument); break;
             case "project": await this.#projectController.select(argument); break;
             case "search": await this.#promptSearch(); break;
@@ -406,6 +407,12 @@ export class ScriberyTuiApp {
 
     #autocompleteCommands(): SlashCommand[] {
         return COMMANDS.map((command) => {
+            if (command.name === "index") {
+                return {
+                    ...command,
+                    getArgumentCompletions: (prefix: string) => this.#projectIndexing.getTargetCompletions(prefix),
+                };
+            }
             if (command.name === "project") {
                 return {
                     ...command,

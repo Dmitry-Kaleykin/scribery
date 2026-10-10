@@ -1,7 +1,7 @@
 import type { SlashCommand } from "@earendil-works/pi-tui";
 
 export const COMMANDS: readonly SlashCommand[] = [
-    { name: "index", description: "Create an up-to-date index for the active project" },
+    { name: "index", description: "Index the active project (target defaults to the current Git branch)", argumentHint: "[target]" },
     { name: "live", description: "Keep the current Git branch indexed automatically" },
     { name: "project", description: "Switch or inspect an indexed project" },
     { name: "search", description: "Search with a guided query prompt" },
@@ -30,6 +30,7 @@ export function commandHelp(): string {
         ),
         "",
         "Type a question without / to search the active project.",
+        "/index [target] defaults to the current Git branch. Type /index followed by a space for target suggestions.",
         "↑↓ navigate · Enter select · Tab complete · Esc back",
     ].join("\n");
 }

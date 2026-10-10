@@ -1,14 +1,13 @@
-import { spawnSync } from "node:child_process";
-import { basename, resolve } from "node:path";
+import { basename } from "node:path";
 
-import type { SelectItem } from "@earendil-works/pi-tui";
+import type { AutocompleteItem, SelectItem } from "@earendil-works/pi-tui";
 import {
     managedProjectIdentifier,
-    normalizeRetrievalTargetName,
     type IndexedProjectSummary,
     type IndexingPreset,
     type IndexingPresetService,
     type ProjectIndexingEvent,
+    type ProjectRetrievalTargetService,
     type ProviderProfileService,
 } from "scribery";
 
@@ -17,6 +16,12 @@ import type { ManualOperationManager } from "../operations/manual-operation-mana
 import type { ProjectPreferenceStore } from "../services/preference-store.js";
 import type { ProviderAccess } from "../services/provider-access.js";
 import { shouldRenderIndexingProgressImmediately } from "../services/indexing-render-policy.js";
+import {
+    currentGitIndexTarget,
+    detectProjectRoot,
+    localBranchIndexTargets,
+    normalizeManualIndexTarget,
+} from "../services/index-targets.js";
 import type { TranscriptTone } from "./contracts.js";
 import type { ProfileController } from "./profile-controller.js";
 
@@ -47,6 +52,7 @@ export interface ProjectIndexingControllerOptions {
     preferences: ProjectPreferenceStore;
     profiles: ProviderProfileService;
     presets: IndexingPresetService;
+    targets: ProjectRetrievalTargetService;
     profileController: ProfileController;
     pickPreset(
         presets: readonly IndexingPreset[],
@@ -66,6 +72,7 @@ export class ProjectIndexingController {
     readonly #preferences: ProjectPreferenceStore;
     readonly #profiles: ProviderProfileService;
     readonly #presets: IndexingPresetService;
+    readonly #targets: ProjectRetrievalTargetService;
     readonly #profileController: ProfileController;
     readonly #pickPreset: ProjectIndexingControllerOptions["pickPreset"];
     readonly #activeProject: () => IndexedProjectSummary | undefined;
@@ -81,6 +88,7 @@ export class ProjectIndexingController {
         this.#preferences = options.preferences;
         this.#profiles = options.profiles;
         this.#presets = options.presets;
+        this.#targets = options.targets;
         this.#profileController = options.profileController;
         this.#pickPreset = options.pickPreset;
         this.#activeProject = options.activeProject;
@@ -89,7 +97,42 @@ export class ProjectIndexingController {
         this.#refreshProjects = options.refreshProjects;
     }
 
-    async configureAndStart(): Promise<void> {
+    async getTargetCompletions(prefix: string): Promise<AutocompleteItem[]> {
+        const project = this.#activeProject();
+        const root = project?.root ?? await detectProjectRoot(this.#cwd);
+        const [current, branches, listing] = await Promise.all([
+            currentGitIndexTarget(root).catch(() => undefined),
+            localBranchIndexTargets(root),
+            project
+                ? this.#targets.list(project.projectIdentifier, this.#cwd).catch(() => undefined)
+                : undefined,
+        ]);
+        const items = new Map<string, AutocompleteItem>();
+        const add = (item: AutocompleteItem): void => {
+            try {
+                normalizeManualIndexTarget(item.value);
+                if (!items.has(item.value)) items.set(item.value, item);
+            } catch { /* Omit targets unavailable for manual indexing. */ }
+        };
+        if (current) add(current);
+        for (const branch of branches) add(branch);
+        if (Array.isArray(listing?.targets)) {
+            for (const target of listing.targets) {
+                if (typeof target === "object" && target !== null && "name" in target && typeof target.name === "string") {
+                    add({ value: target.name, label: target.name, description: "Existing retrieval target" });
+                }
+            }
+        }
+        const saved = this.#activePreference()?.target;
+        if (saved) add({ value: saved, label: saved, description: "Last indexing target" });
+        if (items.size === 0) add({ value: "main", label: "main", description: "Default target" });
+        const filter = prefix.trim().toLowerCase();
+        return [...items.values()].filter((item) =>
+            `${item.value} ${item.description ?? ""}`.toLowerCase().includes(filter),
+        );
+    }
+
+    async configureAndStart(argument = ""): Promise<void> {
         if (this.#liveRunning()) {
             this.#ui.append("Stop live indexing with /live stop before running a manual index.", "warning");
             return;
@@ -100,7 +143,11 @@ export class ProjectIndexingController {
         }
         const project = this.#activeProject();
         const preference = this.#activePreference();
-        const root = project?.root ?? detectProjectRoot(this.#cwd);
+        const root = project?.root ?? await detectProjectRoot(this.#cwd);
+        let target = argument.trim()
+            ? normalizeManualIndexTarget(argument)
+            : (await currentGitIndexTarget(root))?.value ?? preference?.target ?? "main";
+        target = normalizeManualIndexTarget(target);
         const profiles = await this.#profiles.list();
         const presets = await this.#presets.list();
         if (profiles.length === 0) {
@@ -120,7 +167,6 @@ export class ProjectIndexingController {
         if (!presetName) presetName = await this.#pickPreset(presets, "Select indexing preset");
         if (!presetName) return;
 
-        let target = preference?.target ?? "main";
         while (true) {
             const action = await this.#ui.pick("Index project", [
                 { value: "start", label: "Start indexing", description: `${profileName} · ${presetName} · target ${target}` },
@@ -136,8 +182,17 @@ export class ProjectIndexingController {
             } else if (action.value === "preset") {
                 presetName = await this.#pickPreset(presets, "Select indexing preset") ?? presetName;
             } else if (action.value === "target") {
-                const selected = (await this.#ui.input("Index project", "Target", target))?.trim();
-                if (selected) target = normalizeRetrievalTargetName(selected);
+                const choices = await this.getTargetCompletions("");
+                const selected = await this.#ui.pick("Select indexing target", [
+                    ...choices.map((item) => ({ ...item, value: `target:${item.value}` })),
+                    { value: "custom", label: "Custom target…", description: "Enter a target name" },
+                ]);
+                if (selected?.value === "custom") {
+                    const custom = (await this.#ui.input("Index project", "Target", target))?.trim();
+                    if (custom) target = normalizeManualIndexTarget(custom);
+                } else if (selected) {
+                    target = normalizeManualIndexTarget(selected.value.slice("target:".length));
+                }
             }
         }
         void this.#start({
@@ -214,17 +269,6 @@ export class ProjectIndexingController {
             this.#operations.setMessage(`Publishing target ${event.target}`);
         }
     }
-}
-
-function detectProjectRoot(cwd: string): string {
-    const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
-        cwd,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-    });
-    return result.status === 0 && result.stdout.trim()
-        ? resolve(result.stdout.trim())
-        : cwd;
 }
 
 function formatDuration(milliseconds: number): string {

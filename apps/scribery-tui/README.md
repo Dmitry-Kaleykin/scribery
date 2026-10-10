@@ -27,6 +27,23 @@ Both profiles and presets also offer an advanced `Edit JSON` action. JSON editin
 before applying it atomically; names remain managed by the separate rename
 action, and profile API keys never appear in the temporary JSON file.
 
+## Manual indexing
+
+`/index` proposes the current Git branch as the retrieval target, refreshed on
+every invocation. `/index <target>` overrides that default. Type a space after
+`/index` to see local branches and existing targets; use arrows and Tab to select
+a suggestion. The current branch appears first. **Change target** in the indexing
+menu opens a searchable picker with the same suggestions and a custom-name option.
+Profile, preset, and target can still be reviewed before starting.
+
+Targets name the resulting index: selecting another branch name does not switch
+Git branches or index that branch's committed tree. Manual indexing always reads
+the current worktree. For a directory without Git, the target defaults to the last
+saved target or `main`. Detached HEAD uses `detached-<12-character commit>`;
+an unborn branch uses its branch name. Branch names that cannot be used directly
+as targets receive a readable name with a stable hash suffix. `live/current`
+remains reserved for live indexing.
+
 ## Internal structure
 
 `src/app.ts` is the composition shell: it creates shared services, connects
