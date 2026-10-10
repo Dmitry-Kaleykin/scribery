@@ -37,7 +37,7 @@ export class IndexingCoordinator {
     async index(configuration: IndexingConfiguration): Promise<IndexingResult> {
         validateConfiguration(configuration);
         emitProgress(configuration, { phase: "source-inspection" });
-        const source = await this.#sources.prepare({
+        const source = configuration.preparedSource ?? await this.#sources.prepare({
             root: configuration.root,
             ...(configuration.repositoryIdentity === undefined
                 ? {}

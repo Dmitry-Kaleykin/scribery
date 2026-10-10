@@ -1,6 +1,7 @@
 import type { SerializedError } from "scribery-core";
 import type { ProjectIndexingEvent } from "./project-indexing.js";
 import type { ProjectIndexingProvider } from "./indexing-recipe.js";
+import type { ProjectRetrievalSelection } from "./retrieval-target.js";
 
 export type ProjectLiveIndexingPhase =
     | "starting"
@@ -31,6 +32,8 @@ export interface ProjectLiveIndexingStatus {
     target?: string;
     indexBuildId?: string;
     error?: SerializedError;
+    previousSelection?: ProjectRetrievalSelection;
+    cacheBuildLimit?: number;
 }
 
 export interface ProjectLiveIndexingRequest {
@@ -44,6 +47,9 @@ export interface ProjectLiveIndexingRequest {
     exclude?: readonly string[];
     debounceMilliseconds?: number;
     pollIntervalMilliseconds?: number;
+    maximumWaitMilliseconds?: number;
+    minimumBuildIntervalMilliseconds?: number;
+    cacheBuildLimit?: number;
     onEvent?: (event: ProjectLiveIndexingEvent) => void;
 }
 

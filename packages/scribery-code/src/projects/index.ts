@@ -79,6 +79,7 @@ export {
 } from "./live/live-state-catalog.js";
 export {
     liveBranchTarget,
+    LIVE_CURRENT_TARGET,
     liveTargetName,
     type LiveBranchTarget,
 } from "./live/live-target.js";

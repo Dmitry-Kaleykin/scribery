@@ -116,44 +116,71 @@ compatibility.
 Documentation has its own active builds and source tags. Project retrieval
 targets do not participate in documentation lookup, filtering, or lifecycle.
 
-## Branch-aware live indexing
+## Live indexing
 
-`ProjectLiveIndexingService` watches one existing managed Git project and
-automatically owns targets under the `live/` namespace. A normal branch maps
-directly to a readable project-local target:
+`ProjectLiveIndexingService` watches one existing managed Git project and owns
+one temporary `live/current` target. Its session ID is stored on the target;
+the actual branch (including detached/unborn labels) is stored in session
+status. Target listings expose it as `live`, separately from ordinary `targets`
+and `targetCount`. Permanent release, stage, and stable targets are explicitly
+managed through normal indexing and retrieval commands.
 
-```text
-release7 -> live/release7
-task123  -> live/task123
-```
+The scheduler combines filesystem events (excluding `.git` and `node_modules`)
+with Git polling. Its request options and defaults are:
 
-Detached and unborn worktrees receive explicit fallback target names. Branch
-names that cannot be represented safely as retrieval targets are deterministically
-slugged with a short hash, so distinct Git refs cannot silently collide.
+| Option | Default |
+| --- | --- |
+| `debounceMilliseconds` | 750 |
+| `maximumWaitMilliseconds` | 5,000 |
+| `minimumBuildIntervalMilliseconds` | 5,000 |
+| `pollIntervalMilliseconds` | 2,000 |
+| `cacheBuildLimit` | 20 |
 
-The service responds to recursive filesystem events (excluding `.git` and
-`node_modules`) and polls the complete Git working-tree fingerprint. Events are
-debounced for 750 ms by default. Only one build runs at a time, and events that
-arrive during it are coalesced. Live builds allow dirty worktrees, reuse existing
-artifacts, diagnose the provider once per live session, and do not overwrite the
-project's saved manual indexing recipe.
+Continuous events cannot extend the debounce beyond the maximum wait, subject
+to the build interval and any running reconciliation. Only one reconciliation
+runs at a time, with one scheduled follow-up for changes received during it.
+Manual `reconcile()` skips debounce, deliberately requests indexing, and still
+observes the minimum build interval.
 
-Publication is deliberately two-phase: Scribery first creates an immutable
-ready build without changing a target, then verifies that the branch and full
-Git fingerprint still match. Only then does it assign and activate the
-`live/<branch>` target. It verifies the worktree again after publication and
-never marks an obsolete generation ready. A failed or superseded build cannot
-advance a live target.
+Before indexing, the service prepares the selected source snapshot and compares
+its paths/content hashes, source selection, HEAD, and branch with the last
+published snapshot. Unchanged snapshots cause no build or retrieval pause.
+Include/exclude and discovery rules apply to this check. Git status alone does
+not detect further edits to an already-modified file; filesystem events provide
+those triggers. Prepared bytes are passed to indexing without another initial
+read. Live builds allow dirty worktrees, reuse compatible artifacts, diagnose
+the provider once after a successful build, and do not overwrite the saved
+manual indexing recipe or preferred manual target.
 
-The current session state is written atomically to
-`~/.scribery/indexes/<project-identifier>/live-indexing.json` and refreshed by
-a heartbeat. Implicit search and chunk inspection fail closed while a fresh
-session is pending, indexing, failed, or points at a build other than the active
-selection. An explicit immutable `indexBuildId` remains available for deliberate
-historical inspection. Stopped and expired sessions no longer gate retrieval.
+Publication builds an immutable index first, then compares a fresh content
+snapshot and Git identity before assigning `live/current`. It checks again
+after assignment before reporting ready. Superseded completed builds are cached
+and the next build goes through the scheduler. Sustained edits can prevent a
+build from becoming ready even though the scheduler continues starting builds.
 
-Live targets are preserved across branch switches and service shutdown. Because
-each target references an immutable build, switching away from unfinished work
-requires no cleanup: its last successful `live/<branch>` target remains until it
-is advanced or manually removed. The initial TUI integration runs the service
-in the foreground and stops it with the TUI; it does not install a daemon.
+Live cache ownership and recency are persisted in `live-build-cache.json`.
+Only tracked live builds are evicted; reusing an untracked manual build does
+not make it cache-owned. The newest `cacheBuildLimit` unreferenced live builds
+are kept, plus builds protected by targets/history, active selection, the saved
+previous selection, or a building status. This is separate from manual target
+`keepReplacedBuilds` retention. Compatible reuse searches ready builds regardless
+of whether they have targets or which branch created them.
+
+Session status, the previous selection, and the cache limit are written
+atomically to `live-indexing.json` and refreshed by a heartbeat. Implicit search
+and inspection reject fresh pending/indexing/failed sessions or a ready session
+whose build differs from the active selection. Explicit immutable build lookup
+remains available.
+
+Shutdown atomically restores the previous selection and removes the owned
+temporary target; cached builds remain. With an implicit latest-ready selection,
+the pre-session build is saved as an exact selection to prevent a live build
+from becoming the fallback after shutdown. A newer external selection is
+preserved. Target reads and implicit retrieval recover expired/stopped sessions
+using the same ownership check. Sessions expire after ten seconds without a
+heartbeat. The TUI stops the foreground service on exit; no daemon is installed.
+
+`ProjectRetrievalTargetService.cleanupLegacyLiveTargets()` (TUI `/live cleanup`)
+explicitly removes old `live/<branch>` targets after live mode is stopped,
+registers their builds in the live cache, and preserves an active legacy build
+as an exact selection. It does not delete builds during migration.

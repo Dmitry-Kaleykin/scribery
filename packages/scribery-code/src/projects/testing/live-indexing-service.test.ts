@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -22,7 +22,7 @@ import type {
 const PROJECT_IDENTIFIER = "0123456789abcdef01234567";
 
 describe("branch-aware live indexing", () => {
-    it("publishes and advances an automatic target for the current branch", async () => {
+    it("publishes one temporary target across branch switches", async () => {
         const fixture = await createFixture();
         try {
             let state = gitState("release7", "a".repeat(40));
@@ -56,14 +56,15 @@ describe("branch-aware live indexing", () => {
                 root: fixture.root,
                 provider: inlineProvider(),
                 debounceMilliseconds: 5,
+                minimumBuildIntervalMilliseconds: 5,
                 pollIntervalMilliseconds: 1_000,
                 onEvent: (event) => events.push(event),
             });
             assert.equal(initial.phase, "ready");
             assert.equal(initial.branch, "release7");
-            assert.equal(initial.target, "live/release7");
+            assert.equal(initial.target, "live/current");
             assert.deepEqual(assignments, [{
-                target: "live/release7",
+                target: "live/current",
                 indexBuildId: "index-build_1",
             }]);
             assert.equal(requests[0]?.target, undefined);
@@ -73,11 +74,11 @@ describe("branch-aware live indexing", () => {
 
             state = gitState("task123", "b".repeat(40));
             onChange?.("src/feature.ts");
-            assert.equal(service.status?.phase, "pending");
+            assert.equal(service.status?.phase, "ready");
             await waitFor(() => service.status?.phase === "ready" &&
-                service.status.target === "live/task123");
+                service.status.branch === "task123");
             assert.deepEqual(assignments.at(-1), {
-                target: "live/task123",
+                target: "live/current",
                 indexBuildId: "index-build_2",
             });
             assert.equal(requests[1]?.diagnoseProvider, false);
@@ -121,6 +122,7 @@ describe("branch-aware live indexing", () => {
                 root: fixture.root,
                 provider: inlineProvider(),
                 debounceMilliseconds: 5,
+                minimumBuildIntervalMilliseconds: 5,
                 pollIntervalMilliseconds: 1_000,
             });
             await waitFor(() => builds.length === 1);
@@ -134,8 +136,10 @@ describe("branch-aware live indexing", () => {
             builds[1]!.resolve(outcome("index-build_task"));
             const ready = await starting;
 
-            assert.equal(ready.target, "live/task123");
-            assert.deepEqual(assignments, ["live/task123"]);
+            assert.equal(ready.target, "live/current");
+            assert.deepEqual(assignments, ["live/current"]);
+            const cached = JSON.parse(await readFile(join(fixture.indexesDirectory, PROJECT_IDENTIFIER, "live-build-cache.json"), "utf8")) as Array<{ indexBuildId: string }>;
+            assert.ok(cached.some(({ indexBuildId }) => indexBuildId === "index-build_release"));
             await service.stop();
         } finally {
             await fixture.remove();
@@ -164,13 +168,14 @@ describe("branch-aware live indexing", () => {
                 root: fixture.root,
                 provider: inlineProvider(),
                 pollIntervalMilliseconds: 1_000,
+                minimumBuildIntervalMilliseconds: 5,
             });
             assert.equal(failed.phase, "failed");
             assert.equal(service.running, true);
 
             const retried = await service.reconcile();
             assert.equal(retried.phase, "ready");
-            assert.equal(retried.target, "live/task123");
+            assert.equal(retried.target, "live/current");
             await service.stop();
         } finally {
             await fixture.remove();
@@ -233,6 +238,210 @@ describe("branch-aware live indexing", () => {
         assert.equal(liveTargetName("release7"), "live/release7");
         assert.equal(liveTargetName("feature/task-123"), "live/feature/task-123");
         assert.match(liveTargetName("feature@{test}"), /^live\/feature-test-[a-f0-9]{10}$/u);
+    });
+
+    it("skips duplicate events, excluded changes, and saves that return to indexed content", async () => {
+        const fixture = await createFixture();
+        let onChange: ((path?: string) => void) | undefined;
+        let checks = 0;
+        let builds = 0;
+        const service = new ProjectLiveIndexingService({
+            indexesDirectory: fixture.indexesDirectory,
+            inspectSource: async () => { checks += 1; return sourceState(fixture.root, gitState("feature", "a".repeat(40))); },
+            resolveProject: async () => projectSummary(fixture.root),
+            index: async (request) => {
+                assert.equal(new TextDecoder().decode(request.preparedSource?.documents[0]?.bytes), "original");
+                return outcome(`build_${++builds}`);
+            },
+            assignTarget: async () => ({}),
+            watchRoot: (_root, change) => { onChange = change; return { close() {} }; },
+        });
+        try {
+            await writeFile(join(fixture.root, "source.ts"), "original");
+            await service.start({ root: fixture.root, provider: inlineProvider(), exclude: ["*.log"], debounceMilliseconds: 20, minimumBuildIntervalMilliseconds: 5 });
+            const before = checks;
+            await writeFile(join(fixture.root, "source.ts"), "temporary");
+            onChange?.("source.ts");
+            await writeFile(join(fixture.root, "source.ts"), "original");
+            await writeFile(join(fixture.root, "output.log"), "irrelevant");
+            onChange?.("output.log");
+            onChange?.("source.ts");
+            await waitFor(() => checks > before);
+            await service.reconcile();
+            // Manual reconciliation is deliberate even when content is unchanged.
+            assert.equal(builds, 2);
+            assert.equal(service.status?.phase, "ready");
+        } finally {
+            await service.stop();
+            await fixture.remove();
+        }
+    });
+
+    it("detects further edits to an already-modified file and enforces the build interval", async () => {
+        const fixture = await createFixture();
+        let onChange: ((path?: string) => void) | undefined;
+        const starts: number[] = [];
+        const contents: string[] = [];
+        const state = { ...gitState("feature", "a".repeat(40)), dirty: true, changes: [{ path: "source.ts", kind: "modified" as const, staged: false, unstaged: true }] };
+        const service = new ProjectLiveIndexingService({
+            indexesDirectory: fixture.indexesDirectory,
+            inspectSource: async () => sourceState(fixture.root, state),
+            resolveProject: async () => projectSummary(fixture.root),
+            index: async (request) => {
+                starts.push(Date.now());
+                contents.push(new TextDecoder().decode(request.preparedSource?.documents[0]?.bytes));
+                return outcome(`build_${starts.length}`);
+            },
+            assignTarget: async () => ({}),
+            watchRoot: (_root, change) => { onChange = change; return { close() {} }; },
+        });
+        try {
+            await writeFile(join(fixture.root, "source.ts"), "first");
+            await service.start({ root: fixture.root, provider: inlineProvider(), debounceMilliseconds: 5, minimumBuildIntervalMilliseconds: 80 });
+            await writeFile(join(fixture.root, "source.ts"), "second");
+            onChange?.("source.ts");
+            await waitFor(() => contents.length === 2 && service.status?.phase === "ready");
+            assert.deepEqual(contents, ["first", "second"]);
+            assert.ok(starts[1]! - starts[0]! >= 80);
+        } finally {
+            await service.stop();
+            await fixture.remove();
+        }
+    });
+
+    it("bounds debounce during continuous filesystem events", async () => {
+        const fixture = await createFixture();
+        let onChange: ((path?: string) => void) | undefined;
+        let builds = 0;
+        let timer: NodeJS.Timeout | undefined;
+        const service = new ProjectLiveIndexingService({
+            indexesDirectory: fixture.indexesDirectory,
+            inspectSource: async () => sourceState(fixture.root, gitState("feature", "a".repeat(40))),
+            resolveProject: async () => projectSummary(fixture.root),
+            index: async () => outcome(`build_${++builds}`),
+            assignTarget: async () => ({}),
+            watchRoot: (_root, change) => { onChange = change; return { close() {} }; },
+        });
+        try {
+            await writeFile(join(fixture.root, "source.ts"), "first");
+            await service.start({ root: fixture.root, provider: inlineProvider(), debounceMilliseconds: 200, maximumWaitMilliseconds: 40, minimumBuildIntervalMilliseconds: 5 });
+            await writeFile(join(fixture.root, "source.ts"), "second");
+            onChange?.("source.ts");
+            timer = setInterval(() => onChange?.("source.ts"), 5);
+            await waitFor(() => builds === 2);
+            assert.equal(builds, 2);
+        } finally {
+            if (timer !== undefined) clearInterval(timer);
+            await service.stop();
+            await fixture.remove();
+        }
+    });
+
+    it("detects content changes during indexing even without a watcher event", async () => {
+        const fixture = await createFixture();
+        let builds = 0;
+        const publications: string[] = [];
+        const service = new ProjectLiveIndexingService({
+            indexesDirectory: fixture.indexesDirectory,
+            inspectSource: async () => sourceState(fixture.root, gitState("feature", "a".repeat(40))),
+            resolveProject: async () => projectSummary(fixture.root),
+            index: async () => {
+                if (++builds === 1) await writeFile(join(fixture.root, "source.ts"), "second");
+                return outcome(`build_${builds}`);
+            },
+            assignTarget: async (_project, _target, buildId) => { publications.push(buildId); return {}; },
+            watchRoot: () => ({ close() {} }),
+        });
+        try {
+            await writeFile(join(fixture.root, "source.ts"), "first");
+            await service.start({ root: fixture.root, provider: inlineProvider(), debounceMilliseconds: 5, minimumBuildIntervalMilliseconds: 5 });
+            assert.equal(builds, 2);
+            assert.deepEqual(publications, ["build_2"]);
+        } finally {
+            await service.stop();
+            await fixture.remove();
+        }
+    });
+
+    it("checks content after target assignment before reporting ready", async () => {
+        const fixture = await createFixture();
+        let builds = 0;
+        const readyBuilds: string[] = [];
+        const service = new ProjectLiveIndexingService({
+            indexesDirectory: fixture.indexesDirectory,
+            inspectSource: async () => sourceState(fixture.root, gitState("feature", "a".repeat(40))),
+            resolveProject: async () => projectSummary(fixture.root),
+            index: async () => outcome(`build_${++builds}`),
+            assignTarget: async () => {
+                if (builds === 1) await writeFile(join(fixture.root, "source.ts"), "second");
+                return {};
+            },
+            watchRoot: () => ({ close() {} }),
+        });
+        try {
+            await writeFile(join(fixture.root, "source.ts"), "first");
+            await service.start({ root: fixture.root, provider: inlineProvider(), debounceMilliseconds: 5, minimumBuildIntervalMilliseconds: 5, onEvent: (event) => {
+                if (event.type === "status" && event.status.phase === "ready") readyBuilds.push(event.status.indexBuildId!);
+            } });
+            assert.deepEqual(readyBuilds, ["build_2"]);
+        } finally {
+            await service.stop();
+            await fixture.remove();
+        }
+    });
+
+    it("detects a branch change through Git polling without a filesystem event", async () => {
+        const fixture = await createFixture();
+        let state = gitState("first", "a".repeat(40));
+        let builds = 0;
+        const service = new ProjectLiveIndexingService({
+            indexesDirectory: fixture.indexesDirectory,
+            inspectSource: async () => sourceState(fixture.root, state),
+            resolveProject: async () => projectSummary(fixture.root),
+            index: async () => outcome(`build_${++builds}`),
+            assignTarget: async () => ({}),
+            watchRoot: () => ({ close() {} }),
+        });
+        try {
+            await service.start({ root: fixture.root, provider: inlineProvider(), debounceMilliseconds: 5, pollIntervalMilliseconds: 10, minimumBuildIntervalMilliseconds: 5 });
+            state = gitState("second", "b".repeat(40));
+            await waitFor(() => service.status?.phase === "ready" && service.status.branch === "second");
+            assert.equal(builds, 2);
+        } finally {
+            await service.stop();
+            await fixture.remove();
+        }
+    });
+
+    it("aborts an active build and shares concurrent shutdown calls", async () => {
+        const fixture = await createFixture();
+        let building = false;
+        let aborted = false;
+        let closed = false;
+        const service = new ProjectLiveIndexingService({
+            indexesDirectory: fixture.indexesDirectory,
+            inspectSource: async () => sourceState(fixture.root, gitState("feature", "a".repeat(40))),
+            resolveProject: async () => projectSummary(fixture.root),
+            index: async (request) => new Promise((_resolve, reject) => {
+                building = true;
+                request.signal?.addEventListener("abort", () => { aborted = true; reject(request.signal?.reason); }, { once: true });
+            }),
+            assignTarget: async () => { throw new Error("An aborted build must not be published"); },
+            watchRoot: () => ({ close() { closed = true; } }),
+        });
+        try {
+            const starting = service.start({ root: fixture.root, provider: inlineProvider() });
+            await waitFor(() => building);
+            const [first, second] = await Promise.all([service.stop(), service.stop()]);
+            assert.equal(first?.phase, "stopped");
+            assert.equal(second?.phase, "stopped");
+            assert.equal((await starting).phase, "stopped");
+            assert.equal(service.running, false);
+            assert.ok(aborted && closed);
+        } finally {
+            await service.stop();
+            await fixture.remove();
+        }
     });
 });
 

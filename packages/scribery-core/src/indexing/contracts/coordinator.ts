@@ -13,6 +13,7 @@ export interface EncodingPathRule {
 
 export interface IndexingConfiguration {
     root: string;
+    preparedSource?: import("../../sources/contracts/source.js").PreparedSourceSnapshot;
     repositoryIdentity?: string;
     allowDirty?: boolean;
     include?: readonly string[];

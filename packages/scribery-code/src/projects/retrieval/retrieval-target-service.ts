@@ -6,6 +6,7 @@ import {
 import type {
     ProjectRetrievalTarget,
     ProjectRetrievalTargets,
+    ProjectRetrievalSelection,
     ResolvedProjectRetrievalSelection,
 } from "../contracts/retrieval-target.js";
 import {
@@ -18,6 +19,9 @@ import {
     normalizeRetrievalTargetName,
     ProjectRetrievalTargetCatalog,
 } from "./target-catalog.js";
+import { ProjectLiveIndexingStateCatalog, LIVE_INDEXING_STALE_AFTER_MILLISECONDS } from "../live/live-state-catalog.js";
+import { LIVE_CURRENT_TARGET } from "../live/live-target.js";
+import { ProjectLiveBuildCache } from "../live/live-build-cache.js";
 
 export interface ProjectRetrievalTargetServiceOptions {
     indexesDirectory?: string;
@@ -48,6 +52,7 @@ export class ProjectRetrievalTargetService {
         currentDirectory = process.cwd(),
     ): Promise<Readonly<Record<string, unknown>>> {
         const project = await this.resolveProject(reference, currentDirectory);
+        await this.recoverLiveSession(project);
         const manifest = await this.#catalog.read(project.projectIdentifier);
         const resolved = resolveSelection(manifest, project);
 
@@ -55,8 +60,9 @@ export class ProjectRetrievalTargetService {
             projectIdentifier: project.projectIdentifier,
             ...(project.root === undefined ? {} : { root: project.root }),
             active: resolved,
-            targetCount: manifest.targets.length,
-            targets: manifest.targets.map((target) => ({
+            live: manifest.targets.find((target) => target.liveSessionId !== undefined) ?? null,
+            targetCount: manifest.targets.filter((target) => target.liveSessionId === undefined).length,
+            targets: manifest.targets.filter((target) => target.liveSessionId === undefined).map((target) => ({
                 ...target,
                 active: manifest.active?.type === "target" &&
                     manifest.active.target === target.name,
@@ -69,6 +75,7 @@ export class ProjectRetrievalTargetService {
         currentDirectory = process.cwd(),
     ): Promise<Readonly<Record<string, unknown>>> {
         const project = await this.resolveProject(reference, currentDirectory);
+        await this.recoverLiveSession(project);
         const manifest = await this.#catalog.read(project.projectIdentifier);
         const selection = resolveSelection(manifest, project);
 
@@ -125,6 +132,55 @@ export class ProjectRetrievalTargetService {
             ...assignmentResult(project, manifest, normalizedTarget),
             ...(retention === undefined ? {} : { retention }),
         };
+    }
+
+    async assignLiveTarget(projectReference: string, indexBuildId: string, sessionId: string): Promise<Readonly<Record<string, unknown>>> {
+        const project = await this.resolveProject(projectReference);
+        await this.#readyBuild(project, indexBuildId);
+        const manifest = await this.#catalog.setTarget(
+            project.projectIdentifier, LIVE_CURRENT_TARGET, indexBuildId, true, undefined, sessionId,
+        );
+        return assignmentResult(project, manifest, LIVE_CURRENT_TARGET);
+    }
+
+    async previousSelection(project: IndexedProjectSummary): Promise<ProjectRetrievalSelection> {
+        await this.recoverLiveSession(project);
+        const manifest = await this.#catalog.read(project.projectIdentifier);
+        if (manifest.active !== undefined) return manifest.active;
+        // Freeze the fallback before live builds become the newest ready builds.
+        return project.latestReadyBuild === undefined
+            ? { type: "none" }
+            : { type: "build", indexBuildId: project.latestReadyBuild.indexBuildId };
+    }
+
+    async releaseLiveTarget(projectIdentifier: string, sessionId: string, previousSelection: ProjectRetrievalSelection): Promise<void> {
+        await this.#catalog.releaseLiveTarget(projectIdentifier, sessionId, previousSelection);
+    }
+
+    async recoverLiveSession(project: IndexedProjectSummary): Promise<void> {
+        const states = new ProjectLiveIndexingStateCatalog(this.#indexesDirectory);
+        const status = await states.read(project.projectIdentifier);
+        if (status === undefined || status.previousSelection === undefined ||
+            (status.phase !== "stopped" && Date.now() - Date.parse(status.updatedAt) <= LIVE_INDEXING_STALE_AFTER_MILLISECONDS)) return;
+        await this.releaseLiveTarget(project.projectIdentifier, status.sessionId, status.previousSelection);
+    }
+
+    async cleanupLegacyLiveTargets(reference?: string, currentDirectory = process.cwd()): Promise<Readonly<Record<string, unknown>>> {
+        const project = await this.resolveProject(reference, currentDirectory);
+        const status = await new ProjectLiveIndexingStateCatalog(this.#indexesDirectory).read(project.projectIdentifier);
+        if (status !== undefined && status.phase !== "stopped" &&
+            Date.now() - Date.parse(status.updatedAt) <= LIVE_INDEXING_STALE_AFTER_MILLISECONDS) {
+            throw new Error("Stop live indexing before cleaning up legacy live targets");
+        }
+        await this.recoverLiveSession(project);
+        const removed = await this.#catalog.removeLegacyLiveTargets(project.projectIdentifier);
+        const cache = new ProjectLiveBuildCache(this.#indexesDirectory);
+        for (const target of removed) {
+            for (const buildId of [target.indexBuildId, ...(target.retainedBuildIds ?? [])]) {
+                await cache.record(project.projectIdentifier, buildId, false);
+            }
+        }
+        return { projectIdentifier: project.projectIdentifier, removed: removed.map(({ name }) => name) };
     }
 
     async switchTarget(
@@ -228,6 +284,7 @@ export class ProjectRetrievalTargetService {
     async activeSelection(
         project: IndexedProjectSummary,
     ): Promise<ResolvedProjectRetrievalSelection | undefined> {
+        await this.recoverLiveSession(project);
         return resolveSelection(
             await this.#catalog.read(project.projectIdentifier),
             project,
@@ -240,8 +297,12 @@ export class ProjectRetrievalTargetService {
         currentDirectory = process.cwd(),
     ): Promise<DeletedIndexBuild> {
         const project = await this.resolveProject(reference, currentDirectory);
+        await this.recoverLiveSession(project);
         const manifest = await this.#catalog.read(project.projectIdentifier);
         const protectedBuildIds = new Set(referencedBuildIds(manifest));
+        for (const buildId of await this.#liveProtectedBuildIds(project.projectIdentifier)) {
+            protectedBuildIds.add(buildId);
+        }
         const active = resolveSelection(manifest, project);
 
         if (active !== undefined) {
@@ -303,7 +364,10 @@ export class ProjectRetrievalTargetService {
         const retainedBuildIds = currentTarget.retainedBuildIds ?? [];
         const previousBuildIds = targetBuildIds(previousTarget);
         const currentBuildIds = new Set(targetBuildIds(currentTarget));
-        const protectedBuildIds = referencedBuildIds(manifest);
+        const protectedBuildIds = new Set(referencedBuildIds(manifest));
+        for (const buildId of await this.#liveProtectedBuildIds(project.projectIdentifier)) {
+            protectedBuildIds.add(buildId);
+        }
         const releasedBuildIds = previousBuildIds.filter(
             (indexBuildId) => !currentBuildIds.has(indexBuildId),
         );
@@ -352,6 +416,16 @@ export class ProjectRetrievalTargetService {
             ...(missingBuildIds.length === 0 ? {} : { missingBuildIds }),
             ...(cleanupFailures.length === 0 ? {} : { cleanupFailures }),
         };
+    }
+
+    async #liveProtectedBuildIds(projectIdentifier: string): Promise<readonly string[]> {
+        const live = await new ProjectLiveIndexingStateCatalog(this.#indexesDirectory).read(projectIdentifier);
+        if (live === undefined || live.phase === "stopped" ||
+            Date.now() - Date.parse(live.updatedAt) > LIVE_INDEXING_STALE_AFTER_MILLISECONDS) return [];
+        return [
+            ...(live.indexBuildId === undefined ? [] : [live.indexBuildId]),
+            ...(live.previousSelection?.type === "build" ? [live.previousSelection.indexBuildId] : []),
+        ];
     }
 }
 

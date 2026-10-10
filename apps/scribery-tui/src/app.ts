@@ -424,12 +424,13 @@ export class ScriberyTuiApp {
             if (command.name === "live") {
                 return {
                     ...command,
-                    argumentHint: "[start|status|reconcile|stop]",
+                    argumentHint: "[start|status|reconcile|stop|cleanup]",
                     getArgumentCompletions: (prefix: string) => [
-                        { value: "start", label: "start", description: "Start branch-aware live indexing" },
+                        { value: "start", label: "start", description: "Start live worktree indexing" },
                         { value: "status", label: "status", description: "Show the current live state" },
                         { value: "reconcile", label: "reconcile", description: "Index the worktree now" },
-                        { value: "stop", label: "stop", description: "Stop and preserve the last live target" },
+                        { value: "stop", label: "stop", description: "Stop and restore the previous retrieval selection" },
+                        { value: "cleanup", label: "cleanup", description: "Remove old live branch targets while keeping their builds" },
                     ].filter((item) => item.value.includes(prefix.toLowerCase())),
                 };
             }

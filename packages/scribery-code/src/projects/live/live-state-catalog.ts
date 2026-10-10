@@ -123,6 +123,18 @@ function validateStatus(
     ) {
         throw new Error("Project live indexing state is invalid");
     }
+    if (value.previousSelection !== undefined) {
+        const selection = value.previousSelection;
+        if (!isRecord(selection) || !(
+            selection.type === "none" ||
+            (selection.type === "target" && typeof selection.target === "string" && selection.target.length > 0) ||
+            (selection.type === "build" && typeof selection.indexBuildId === "string" && selection.indexBuildId.length > 0)
+        )) throw new Error("Project live previous selection is invalid");
+    }
+    if (value.cacheBuildLimit !== undefined &&
+        (typeof value.cacheBuildLimit !== "number" || !Number.isSafeInteger(value.cacheBuildLimit) || value.cacheBuildLimit < 0)) {
+        throw new Error("Project live cache limit is invalid");
+    }
     return value as unknown as ProjectLiveIndexingStatus;
 }
 

@@ -4,6 +4,7 @@ export interface ProjectRetrievalTarget {
     createdAt: string;
     updatedAt: string;
     retainedBuildIds?: readonly string[];
+    liveSessionId?: string;
 }
 
 export type ProjectRetrievalSelection =

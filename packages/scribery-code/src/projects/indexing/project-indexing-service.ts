@@ -112,6 +112,9 @@ export class ProjectIndexingService {
             try {
                 return await new IndexingCoordinator(storage, provider).index({
                     root,
+                    ...(request.preparedSource === undefined
+                        ? {}
+                        : { preparedSource: request.preparedSource }),
                     onProgress: (progress) => emit(request, {
                         type: "indexing-progress",
                         progress,

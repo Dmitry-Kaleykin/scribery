@@ -20,6 +20,7 @@ export interface ProjectIndexingRequest extends ProjectIndexingSettings {
     persistRecipe?: boolean;
     signal?: AbortSignal;
     onEvent?: (event: ProjectIndexingEvent) => void;
+    preparedSource?: import("scribery-core").PreparedSourceSnapshot;
 }
 
 interface ProjectIndexingEventBase {

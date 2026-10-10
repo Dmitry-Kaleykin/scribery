@@ -1,11 +1,13 @@
 import { hashText } from "scribery-core";
 import type { WorkingTreeState } from "../../source-control/index.js";
-import { normalizeRetrievalTargetName } from "../retrieval/target-catalog.js";
+import { normalizeRetrievalTargetName } from "../validation/retrieval-target.js";
 
 export interface LiveBranchTarget {
     branch: string;
     target: string;
 }
+
+export const LIVE_CURRENT_TARGET = "live/current";
 
 export function liveBranchTarget(state: WorkingTreeState): LiveBranchTarget {
     if (state.refName !== undefined) {

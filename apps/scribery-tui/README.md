@@ -37,12 +37,14 @@ and reusable terminal presentation under `src/ui`. Controllers depend on small
 UI callback interfaces instead of the application class, so a workflow can be
 extended or tested without growing the shell again.
 
-## Branch-aware live indexing
+## Live indexing
 
 Create the project's first index with `/index`, then use `/live` (or
 `/live start`) to keep the current Git worktree indexed. Live mode uses the
-project's selected provider profile and preset and publishes a target named
-`live/<branch>` only after a complete build still matches the current worktree.
+project's selected provider profile and preset and publishes one temporary
+`live/current` target only after a complete build still matches the current
+worktree. The header shows the actual branch; permanent release, stage, and
+stable targets remain separately managed with manual indexing.
 
 Useful commands:
 
@@ -50,18 +52,31 @@ Useful commands:
 /live status
 /live reconcile
 /live stop
+/live cleanup
 ```
 
-Filesystem changes are debounced and Git state is also polled, so commits,
-checkouts, and branch switches trigger reconciliation even when they do not
-produce an ordinary file event. Only one build runs at a time; changes arriving
-during a build are coalesced into the next build. While a fresh live build is
-pending, indexing, or failed, implicit project retrieval is paused rather than
-serving an older target as if it described the worktree.
+Changes wait for 750 ms of quiet, with a maximum wait of five seconds and at
+least five seconds between build starts. Git state is also polled every two
+seconds. Before building, live mode compares selected file paths and content
+hashes, skipping duplicate events, excluded changes, and saves reverted to
+indexed content. Only one build runs at a time; changes received during it
+are combined into one scheduled follow-up. `/live reconcile` skips the quiet
+period and deliberately requests indexing, subject to the build interval.
+While a confirmed change is pending, indexing, or failed, implicit retrieval
+is paused until a matching build is ready.
 
-Switching from `task123` to `task456` does not remove either target. Scribery
-keeps `live/task123` at its last ready immutable build and creates or advances
-`live/task456`. Returning to the first branch advances its existing target.
-Stopping live mode—or exiting the TUI—keeps the last ready targets and resumes
-ordinary retrieval from the active one. The watcher is a foreground TUI
-service; it is not a background daemon.
+Branch switches advance the same temporary target. Live builds can reuse
+artifacts from other branches without retaining branch targets. The cache
+keeps the newest 20 unreferenced live builds, in addition to protected builds.
+Permanent targets and their history, active selections, and the selection
+saved before live mode starts are protected from cache eviction.
+
+Stopping live mode—or exiting the TUI—removes the temporary target and
+restores the previous retrieval selection. An expired session is recovered
+when targets or implicit retrieval are read. The watcher runs in the
+foreground with the TUI; it is not a background daemon.
+
+For projects indexed with the old per-branch live mode, run `/live cleanup`
+after stopping live mode. This explicitly removes legacy `live/<branch>`
+targets, retaining their builds for reuse. An active legacy target becomes
+an exact build selection. Ordinary named targets are preserved.

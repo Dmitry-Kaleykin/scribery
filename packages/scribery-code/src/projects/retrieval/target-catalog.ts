@@ -17,6 +17,7 @@ import {
     validateManagedProjectIdentifier,
 } from "../managed/paths.js";
 import { normalizeRetrievalTargetName } from "../validation/retrieval-target.js";
+import { LIVE_CURRENT_TARGET } from "../live/live-target.js";
 
 export { normalizeRetrievalTargetName } from "../validation/retrieval-target.js";
 
@@ -46,11 +47,24 @@ export class ProjectRetrievalTargetCatalog {
         indexBuildId: string,
         activate: boolean,
         keepReplacedBuilds?: number,
+        liveSessionId?: string,
     ): Promise<ProjectRetrievalTargets> {
         const target = normalizeRetrievalTargetName(name);
         const build = requiredBuildId(indexBuildId);
         const manifest = await this.read(projectIdentifier);
         const previous = manifest.targets.find((entry) => entry.name === target);
+        if (liveSessionId !== undefined && (liveSessionId.length === 0 || target !== LIVE_CURRENT_TARGET)) {
+            throw new Error("Live target ownership requires a session ID and the reserved live/current target");
+        }
+        if (target === LIVE_CURRENT_TARGET && liveSessionId === undefined) {
+            throw new Error(`${LIVE_CURRENT_TARGET} is reserved for live indexing`);
+        }
+        if (previous?.liveSessionId !== undefined && previous.liveSessionId !== liveSessionId) {
+            throw new Error(`Retrieval target ${target} belongs to another live session`);
+        }
+        if (liveSessionId !== undefined && previous !== undefined && previous.liveSessionId === undefined) {
+            throw new Error(`Retrieval target ${target} already exists and is not a temporary live target`);
+        }
         const now = new Date().toISOString();
         const retainedBuildIds = resolveRetainedBuildIds(
             previous,
@@ -63,6 +77,7 @@ export class ProjectRetrievalTargetCatalog {
             createdAt: previous?.createdAt ?? now,
             updatedAt: now,
             ...(retainedBuildIds.length === 0 ? {} : { retainedBuildIds }),
+            ...(liveSessionId === undefined ? {} : { liveSessionId }),
         };
         const targets = manifest.targets
             .filter((candidate) => candidate.name !== target)
@@ -126,6 +141,9 @@ export class ProjectRetrievalTargetCatalog {
         if (entry === undefined) {
             throw new Error(`Retrieval target ${target} was not found`);
         }
+        if (entry.liveSessionId !== undefined || renamedTarget === LIVE_CURRENT_TARGET) {
+            throw new Error("Temporary live targets cannot be renamed");
+        }
         if (target === renamedTarget) {
             return manifest;
         }
@@ -166,6 +184,9 @@ export class ProjectRetrievalTargetCatalog {
         if (!manifest.targets.some(({ name: candidate }) => candidate === target)) {
             throw new Error(`Retrieval target ${target} was not found`);
         }
+        if (manifest.targets.find(({ name }) => name === target)?.liveSessionId !== undefined) {
+            throw new Error("Temporary live targets are removed by their live session");
+        }
         if (manifest.active?.type === "target" && manifest.active.target === target) {
             throw new Error(
                 `Retrieval target ${target} is active and cannot be removed`,
@@ -179,6 +200,54 @@ export class ProjectRetrievalTargetCatalog {
         };
         await this.#write(updated);
         return updated;
+    }
+
+    /** Restore selection and remove the owned target in one atomic manifest write. */
+    async releaseLiveTarget(
+        projectIdentifier: string,
+        sessionId: string,
+        previousSelection: ProjectRetrievalSelection,
+    ): Promise<ProjectRetrievalTargets> {
+        const manifest = await this.read(projectIdentifier);
+        const owned = manifest.targets.find(({ name, liveSessionId }) =>
+            name === LIVE_CURRENT_TARGET && liveSessionId === sessionId);
+        if (owned === undefined) return manifest;
+        const targets = manifest.targets.filter((target) => target !== owned);
+        const restore = previousSelection.type === "target" &&
+                !targets.some(({ name }) => name === previousSelection.target)
+            ? { type: "none" as const }
+            : previousSelection;
+        const updated: ProjectRetrievalTargets = {
+            ...manifest,
+            targets,
+            updatedAt: new Date().toISOString(),
+            ...(manifest.active?.type === "target" && manifest.active.target === owned.name
+                ? { active: restore }
+                : {}),
+        };
+        await this.#write(updated);
+        return updated;
+    }
+
+    /** Explicit migration: remove old live/<branch> names without deleting builds. */
+    async removeLegacyLiveTargets(projectIdentifier: string): Promise<readonly ProjectRetrievalTarget[]> {
+        const manifest = await this.read(projectIdentifier);
+        const removed = manifest.targets.filter(({ name, liveSessionId }) =>
+            name.startsWith("live/") && liveSessionId === undefined);
+        if (removed.length === 0) return [];
+        const activeName = manifest.active?.type === "target" ? manifest.active.target : undefined;
+        const active = activeName !== undefined
+            ? removed.find(({ name }) => name === activeName)
+            : undefined;
+        await this.#write({
+            ...manifest,
+            targets: manifest.targets.filter((target) => !removed.includes(target)),
+            updatedAt: new Date().toISOString(),
+            ...(active === undefined ? {} : {
+                active: { type: "build", indexBuildId: active.indexBuildId },
+            }),
+        });
+        return removed;
     }
 
     async #write(manifest: ProjectRetrievalTargets): Promise<void> {
@@ -236,6 +305,11 @@ function validateManifest(
         }
 
         const currentBuildId = requiredBuildId(entry.indexBuildId);
+        if (entry.liveSessionId !== undefined &&
+            (typeof entry.liveSessionId !== "string" || entry.liveSessionId.length === 0 ||
+                entry.name !== LIVE_CURRENT_TARGET)) {
+            throw new Error("Project live target ownership is invalid");
+        }
         const retainedBuildIds = validateRetainedBuildIds(
             entry.retainedBuildIds,
             currentBuildId,
@@ -246,6 +320,7 @@ function validateManifest(
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,
             ...(retainedBuildIds.length === 0 ? {} : { retainedBuildIds }),
+            ...(entry.liveSessionId === undefined ? {} : { liveSessionId: entry.liveSessionId as string }),
         };
     });
     const names = new Set(targets.map(({ name }) => name));

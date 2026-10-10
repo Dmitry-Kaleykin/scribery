@@ -3,6 +3,8 @@ import { basename } from "node:path";
 import type { SelectItem } from "@earendil-works/pi-tui";
 import {
     ProjectLiveIndexingService,
+    ProjectRetrievalTargetService,
+    ProjectIndexingRecipeCatalog,
     type IndexedProjectSummary,
     type IndexingPreset,
     type IndexingPresetService,
@@ -110,6 +112,24 @@ export class LiveIndexingController {
 
     async manage(argument = ""): Promise<void> {
         const requestedAction = argument.toLowerCase();
+        if (requestedAction === "cleanup") {
+            const project = this.#activeProject();
+            if (this.running) {
+                this.#ui.append("Stop live indexing before cleaning up old live targets.", "warning");
+            } else if (project !== undefined) {
+                const result = await new ProjectRetrievalTargetService().cleanupLegacyLiveTargets(project.projectIdentifier);
+                const preference = this.#activePreference();
+                if (preference !== undefined && (result.removed as string[]).includes(preference.target)) {
+                    const recipe = await new ProjectIndexingRecipeCatalog().read(project.projectIdentifier);
+                    await this.#preferences.set({ ...preference, target: recipe?.target?.startsWith("live/") === false ? recipe.target : "main" });
+                }
+                await this.#refreshProjects(project.projectIdentifier);
+                this.#ui.append(`Removed ${(result.removed as string[]).length} old live targets. Their builds remain available for reuse.`, "success");
+            } else {
+                this.#ui.append("Select an indexed project first.", "warning");
+            }
+            return;
+        }
         if (requestedAction === "status") {
             this.showStatus();
             return;
@@ -123,13 +143,13 @@ export class LiveIndexingController {
             return;
         }
         if (requestedAction && requestedAction !== "start") {
-            throw new Error("Usage: /live [start|status|reconcile|stop]");
+            throw new Error("Usage: /live [start|status|reconcile|stop|cleanup]");
         }
         if (this.running) {
             const action = await this.#ui.pick("Live indexing", [
                 { value: "status", label: "Show status", description: this.#status?.phase ?? "starting" },
                 { value: "reconcile", label: "Index now", description: "Reconcile without waiting for another file event" },
-                { value: "stop", label: "Stop live indexing", description: "Keep the last published branch target" },
+                { value: "stop", label: "Stop live indexing", description: "Restore the previous retrieval selection" },
             ]);
             if (action?.value === "status") this.showStatus();
             else if (action?.value === "reconcile") this.reconcile();
@@ -206,6 +226,9 @@ export class LiveIndexingController {
         }
         await service.stop();
         await this.#publicationChain;
+        if (this.#liveConfiguration !== undefined) {
+            await this.#refreshProjects(this.#liveConfiguration.projectIdentifier);
+        }
         if (this.#service === service) {
             this.#service = undefined;
             this.#liveConfiguration = undefined;
@@ -214,7 +237,7 @@ export class LiveIndexingController {
         this.#progress.stop();
         this.#ui.updateHeader();
         if (announce) {
-            this.#ui.append("Live indexing stopped. The last ready branch target remains available.", "success");
+            this.#ui.append("Live indexing stopped. The temporary target was removed and the previous retrieval selection restored.", "success");
         }
     }
 
@@ -259,7 +282,7 @@ export class LiveIndexingController {
         this.#lastReadyIdentity = undefined;
         this.#lastFailure = undefined;
         this.#ui.append(
-            `Starting live indexing for ${basename(configuration.root)}. The current Git branch will publish to live/<branch>.`,
+            `Starting live indexing for ${basename(configuration.root)}. The current worktree will publish to the temporary live/current target.`,
             "muted",
         );
         this.#ui.updateHeader();
@@ -375,15 +398,6 @@ export class LiveIndexingController {
             recoveredFromFailure,
         );
         this.#lastFailure = undefined;
-        await this.#preferences.set({
-            projectIdentifier: configuration.projectIdentifier,
-            root: configuration.root,
-            profile: configuration.profile,
-            preset: configuration.preset,
-            target: status.target,
-            keepReplacedBuilds: configuration.keepReplacedBuilds,
-            allowDirty: true,
-        });
         this.#lastReadyPublication = publication;
         this.#lastReadyIdentity = readyIdentity;
         await this.#refreshProjects(configuration.projectIdentifier);

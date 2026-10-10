@@ -45,12 +45,8 @@ export class HeaderComponent implements Component {
             ? `${this.#state.preference.profile} · ${this.#state.preference.preset}`
             : "profile and preset not selected";
         const activeIndex = this.#state.activeIndex;
-        const pendingLiveTarget = live !== undefined && live.phase !== "stopped"
-            ? live.target ?? live.branch
-            : undefined;
-        const liveContext = pendingLiveTarget !== undefined &&
-            pendingLiveTarget !== activeIndex?.target
-            ? ` · next ${pendingLiveTarget}`
+        const liveContext = live !== undefined && live.phase !== "stopped"
+            ? ` · live ${live.branch ?? "worktree"}`
             : "";
         const target = activeIndex?.target ?? "none";
         const build = activeIndex?.indexBuildId.slice(0, 12) ?? "none";
