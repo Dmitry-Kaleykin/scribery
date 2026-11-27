@@ -1,7 +1,6 @@
 import { OpenAiCompatibleCompressionProvider, type RetrievalDiagnostics } from "scribery-core";
-import { normalizeRelativePath } from "scribery-core";
 import {
-    listIndexedProjects,
+    ProjectLiveIndexingStateCatalog,
     ProjectRetrievalTargetService,
     type ResolvedProjectRetrievalSelection,
     type IndexedProjectSummary,
@@ -14,11 +13,9 @@ import {
 } from "scribery-core";
 import { SqliteStorageProvider, type IndexBuildRecord } from "scribery-core";
 import {
-    MCP_DEFAULT_CHUNK_PAGE_SIZE,
     MCP_DEFAULT_RESULT_LIMIT,
 } from "../constants/defaults.js";
 import type {
-    ProjectChunksInput,
     ProjectSearchInput,
     ScriberyMcpServerOptions,
 } from "../contracts/server.js";
@@ -44,15 +41,6 @@ export class McpProjectService {
                 ? {}
                 : { indexesDirectory: options.indexesDirectory }),
         });
-    }
-
-    async listProjects(): Promise<Readonly<Record<string, unknown>>> {
-        const projects = await listIndexedProjects(this.#options.indexesDirectory);
-        const withSelections = await Promise.all(projects.map(async (project) => ({
-            ...project,
-            retrievalSelection: await this.#targets.activeSelection(project),
-        })));
-        return { count: withSelections.length, projects: withSelections };
     }
 
     async search(
@@ -141,48 +129,6 @@ export class McpProjectService {
         }
     }
 
-    async chunks(
-        input: ProjectChunksInput,
-    ): Promise<Readonly<Record<string, unknown>>> {
-        const resolved = await this.#openBuild(
-            input.projectReference,
-            input.indexBuildId,
-        );
-
-        try {
-            const path = normalizeRelativePath(input.path);
-            const result = await resolved.storage.getDocumentChunks({
-                indexBuildId: resolved.build.indexBuildId,
-                path,
-            });
-
-            if (result === undefined) {
-                throw new Error(
-                    `Indexed file ${path} was not found in build ${resolved.build.indexBuildId}`,
-                );
-            }
-
-            const start = input.start ?? 0;
-            const limit = input.limit ?? MCP_DEFAULT_CHUNK_PAGE_SIZE;
-            const chunks = result.chunks.slice(start, start + limit);
-
-            return {
-                projectIdentifier: resolved.project.projectIdentifier,
-                indexBuildId: resolved.build.indexBuildId,
-                retrievalSelection: resolved.selection,
-                path,
-                document: { metadata: result.document.metadata },
-                chunkCount: result.chunks.length,
-                start,
-                returnedChunks: chunks.length,
-                hasMore: start + chunks.length < result.chunks.length,
-                chunks,
-            };
-        } finally {
-            await resolved.storage.close();
-        }
-    }
-
     async #openBuild(
         requestedProject: string | undefined,
         requestedBuild: string | undefined,
@@ -202,6 +148,11 @@ export class McpProjectService {
             throw new Error(
                 `Indexed project ${project.projectIdentifier} has no ready build`,
             );
+        }
+
+        if (requestedBuild === undefined) {
+            await new ProjectLiveIndexingStateCatalog(this.#options.indexesDirectory)
+                .assertReady(project.projectIdentifier, indexBuildId);
         }
 
         const storage = new SqliteStorageProvider(project.databasePath, {
@@ -228,7 +179,7 @@ export class McpProjectService {
         }
     }
 
-    #providerOptions(): { baseUrl?: string; apiKey?: string } {
+    #providerOptions(): { baseUrl?: string; apiKey?: string; fetch?: typeof globalThis.fetch } {
         return {
             ...(this.#options.baseUrl === undefined
                 ? {}
@@ -236,6 +187,7 @@ export class McpProjectService {
             ...(this.#options.apiKey === undefined
                 ? {}
                 : { apiKey: this.#options.apiKey }),
+            ...(this.#options.fetch === undefined ? {} : { fetch: this.#options.fetch }),
         };
     }
 

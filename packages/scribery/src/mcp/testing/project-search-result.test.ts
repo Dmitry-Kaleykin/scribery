@@ -164,7 +164,7 @@ describe("MCP project search result formatting", () => {
         assert.match(text, /Indexed project app has no ready build/u);
         assert.match(
             text,
-            /this is not an empty result[\s\S]*Next: run `scribery reindex/iu,
+            /this is not an empty result[\s\S]*Next: call index_codebase/iu,
         );
     });
 

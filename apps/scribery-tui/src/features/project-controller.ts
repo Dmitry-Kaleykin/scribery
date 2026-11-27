@@ -294,8 +294,6 @@ export class ProjectController {
                     "--project",
                     project.root ?? project.projectIdentifier,
                     ...(profile ? ["--profile", profile] : []),
-                    "--tools",
-                    "search_codebase",
                 ],
             },
         }, null, 2);

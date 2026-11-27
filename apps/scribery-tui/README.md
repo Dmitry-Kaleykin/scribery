@@ -33,7 +33,8 @@ action, and profile API keys never appear in the temporary JSON file.
 every invocation. `/index <target>` overrides that default. Type a space after
 `/index` to see local branches and existing targets; use arrows and Tab to select
 a suggestion. The current branch appears first. **Change target** in the indexing
-menu opens a searchable picker with the same suggestions and a custom-name option.
+menu opens an editable picker: type a target name and press Enter to use it,
+or use the arrow keys to select a suggestion.
 Profile, preset, and target can still be reviewed before starting.
 
 Targets name the resulting index: selecting another branch name does not switch

@@ -20,31 +20,51 @@ export interface PickerOptions {
     requestRender: () => void;
     maxVisible?: number;
     initialFilter?: string;
+    allowCustomValue?: boolean;
 }
 
 export class Picker implements Component, Focusable {
     readonly #title: string;
     readonly #input = new Input();
-    readonly #list: SelectList;
+    #list: SelectList;
+    readonly #options: PickerOptions;
     readonly #requestRender: () => void;
     readonly #onDelete: ((item: SelectItem) => void) | undefined;
     #focused = false;
 
     constructor(options: PickerOptions) {
+        this.#options = options;
         this.#title = options.title;
         this.#requestRender = options.requestRender;
         this.#onDelete = options.onDelete;
-        this.#list = new SelectList(
-            [...options.items],
-            options.maxVisible ?? 10,
-            selectTheme,
-        );
-        this.#list.onSelect = options.onSelect;
-        this.#list.onCancel = options.onCancel;
+        this.#list = this.#createList([...options.items]);
         if (options.initialFilter) {
             this.#input.setValue(options.initialFilter);
-            this.#list.setFilter(options.initialFilter);
+            this.#updateFilter();
         }
+    }
+
+    #createList(items: SelectItem[]): SelectList {
+        const list = new SelectList(items, this.#options.maxVisible ?? 10, selectTheme);
+        list.onSelect = this.#options.onSelect;
+        list.onCancel = this.#options.onCancel;
+        return list;
+    }
+
+    #updateFilter(): void {
+        const value = this.#input.getValue().trim();
+        if (!this.#options.allowCustomValue) {
+            this.#list.setFilter(this.#input.getValue());
+            return;
+        }
+        const filter = value.toLowerCase();
+        const items = this.#options.items.filter((item) =>
+            `${item.value} ${item.label}`.toLowerCase().includes(filter),
+        );
+        if (value && !items.some((item) => item.value === value)) {
+            items.unshift({ value, label: `Use "${value}"`, description: "Use typed name" });
+        }
+        this.#list = this.#createList(items);
     }
 
     get focused(): boolean {
@@ -75,7 +95,7 @@ export class Picker implements Component, Focusable {
             this.#list.handleInput(data);
         } else {
             this.#input.handleInput(data);
-            this.#list.setFilter(this.#input.getValue());
+            this.#updateFilter();
         }
         this.#requestRender();
     }
@@ -86,13 +106,15 @@ export class Picker implements Component, Focusable {
         return [
             line,
             truncateToWidth(`  ${colors.bold(colors.accent(this.#title))}`, width),
-            truncateToWidth(`  ${colors.muted("Filter")} ${this.#input.render(innerWidth - 9)[0] ?? ""}`, width),
+            truncateToWidth(`  ${colors.muted(this.#options.allowCustomValue ? "Name" : "Filter")} ${this.#input.render(innerWidth - 9)[0] ?? ""}`, width),
             "",
             ...this.#list.render(innerWidth).map((item) => truncateToWidth(`  ${item}`, width)),
             "",
             truncateToWidth(
                 `  ${colors.muted(
-                    this.#onDelete === undefined
+                    this.#options.allowCustomValue
+                        ? "Type a name · ↑↓ suggestions · Enter use · Esc cancel"
+                        : this.#onDelete === undefined
                         ? "↑↓ navigate · Enter select · Esc cancel"
                         : "↑↓ navigate · Enter select · Ctrl+D delete · Esc cancel",
                 )}`,

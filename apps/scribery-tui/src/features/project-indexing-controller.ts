@@ -40,7 +40,7 @@ export interface ProjectIndexingUi {
     append(message: string, tone?: TranscriptTone): void;
     appendError(error: unknown): void;
     pick(title: string, items: readonly SelectItem[]): Promise<SelectItem | undefined>;
-    input(title: string, label: string, initialValue?: string): Promise<string | undefined>;
+    pickOrEnter(title: string, items: readonly SelectItem[]): Promise<string | undefined>;
     requestRender(): void;
 }
 
@@ -183,15 +183,13 @@ export class ProjectIndexingController {
                 presetName = await this.#pickPreset(presets, "Select indexing preset") ?? presetName;
             } else if (action.value === "target") {
                 const choices = await this.getTargetCompletions("");
-                const selected = await this.#ui.pick("Select indexing target", [
-                    ...choices.map((item) => ({ ...item, value: `target:${item.value}` })),
-                    { value: "custom", label: "Custom target…", description: "Enter a target name" },
-                ]);
-                if (selected?.value === "custom") {
-                    const custom = (await this.#ui.input("Index project", "Target", target))?.trim();
-                    if (custom) target = normalizeManualIndexTarget(custom);
-                } else if (selected) {
-                    target = normalizeManualIndexTarget(selected.value.slice("target:".length));
+                const selected = await this.#ui.pickOrEnter("Select or enter indexing target", choices);
+                if (selected?.trim()) {
+                    try {
+                        target = normalizeManualIndexTarget(selected);
+                    } catch (error: unknown) {
+                        this.#ui.append(error instanceof Error ? error.message : String(error), "warning");
+                    }
                 }
             }
         }

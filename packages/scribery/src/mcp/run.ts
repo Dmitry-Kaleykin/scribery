@@ -5,7 +5,6 @@ import { parseArgs } from "node:util";
 import { ProviderProfileService } from "scribery-core";
 import type { ScriberyMcpServerOptions } from "./contracts/server.js";
 import { createScriberyMcpServer } from "./server/create-server.js";
-import { parseMcpToolAllowlist } from "./tools/tool-allowlist.js";
 
 export async function runScriberyMcpServer(
     args: readonly string[],
@@ -21,7 +20,6 @@ export async function runScriberyMcpServer(
             "api-key": { type: "string" },
             "rerank-model": { type: "string" },
             "rerank-instruction": { type: "string" },
-            tools: { type: "string", multiple: true },
             help: { type: "boolean" },
             version: { type: "boolean" },
         },
@@ -51,7 +49,6 @@ export async function runScriberyMcpServer(
     const profile = parsed.values.profile === undefined
         ? undefined
         : await new ProviderProfileService().get(parsed.values.profile);
-    const toolAllowlist = parseMcpToolAllowlist(parsed.values.tools);
     const baseUrl = profile?.embedding.baseUrl ?? parsed.values["base-url"];
     const apiKey = resolveMcpApiKey(parsed.values["api-key"]);
     const rerankingModel = profile?.reranking?.model ??
@@ -95,9 +92,6 @@ export async function runScriberyMcpServer(
                     "--rerank-instruction",
                 ),
             }),
-        ...(toolAllowlist === undefined
-            ? {}
-            : { toolAllowlist }),
     };
 
     const server = createScriberyMcpServer(options);
@@ -105,7 +99,7 @@ export async function runScriberyMcpServer(
 }
 
 function printMcpUsage(): void {
-    console.log(`Scribery MCP server (read-only stdio)
+    console.log(`Scribery MCP server (stdio)
 
 Usage:
     scribery-mcp [--project <identifier-or-root>]
@@ -114,14 +108,13 @@ Usage:
         [--compression-model <id>] [--compression-base-url <url>]
         [--compression-timeout <ms>] [--no-compression]
         [--rerank-model <id>]
-        [--rerank-instruction <text>] [--tools <name[,name...]>]
+        [--rerank-instruction <text>]
 
 Available tools:
-    list_projects, search_codebase, inspect_project_chunks,
-    list_documentations, search_documentation, read_documentation_source
+    search_codebase, list_targets, switch_target, index_codebase
 
-Legacy --tools name:
-    retrieval maps to search_codebase
+Tool permissions are managed by the MCP client.
+Indexing reuses saved project settings and defaults its target to the current Git branch.
 
 The normal server mode reserves stdout exclusively for MCP JSON-RPC.
 --api-key overrides OPENAI_COMPATIBLE_API_KEY and the legacy

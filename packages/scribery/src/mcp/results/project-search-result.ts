@@ -84,19 +84,19 @@ export function formatProjectSearchGuidance(error: unknown): string {
     }, {
         guard: /project .* was not found/u.test(message),
         reason: "that project is not one this server can resolve",
-        nextStep: "call list_projects for the searchable projects and their exact " +
-            "roots, then call search_codebase again",
+        nextStep: "restart this server with --project set to the indexed project's " +
+            "exact source root or identifier, then call search_codebase again",
     }, {
         guard: /no ready build|is not ready|build .* was not found/u.test(message),
         reason: "this project has no completed build to read from",
-        nextStep: "run `scribery reindex <project>` or `scribery retrieval switch " +
-            "<project> <target>`, then call search_codebase again",
+        nextStep: "call index_codebase using this project's saved settings, or " +
+            "call list_targets and switch_target to select a ready target, then search again",
     }, {
         guard: /dimension|model identity|model mismatch/u.test(message),
         reason: "the query embedding model differs from the model this project was " +
             "built with",
-        nextStep: "restart this server with the --profile (or --base-url and " +
-            "--model) used to index the project, then call search_codebase again",
+        nextStep: "restart this server with the --profile or --base-url used to " +
+            "index the project, then call search_codebase again",
     }, {
         guard: /embeddin|econnrefused|fetch failed|socket hang up|enotfound|timeout/u
             .test(message),

@@ -242,8 +242,7 @@ export class ScriberyTuiApp {
                 append: (message, tone) => this.#append(message, tone),
                 appendError: (error) => this.#appendError(error),
                 pick: (title, items) => this.#dialogs.pick(title, items),
-                input: (title, label, initialValue) =>
-                    this.#dialogs.input(title, label, initialValue),
+                pickOrEnter: (title, items) => this.#dialogs.pickOrEnter(title, items),
                 requestRender: () => this.#ui.requestRender(),
             },
             operations: this.#operations,

@@ -43,12 +43,20 @@ export class DialogHost {
         return this.#pick(title, items, true);
     }
 
+    async pickOrEnter(
+        title: string,
+        items: readonly SelectItem[],
+    ): Promise<string | undefined> {
+        return (await this.#pick(title, items, false, true))?.item.value;
+    }
+
     async #pick(
         title: string,
         items: readonly SelectItem[],
         allowDelete: boolean,
+        allowCustomValue = false,
     ): Promise<PickerOutcome | undefined> {
-        if (items.length === 0) return undefined;
+        if (items.length === 0 && !allowCustomValue) return undefined;
         return new Promise((resolveSelection) => {
             this.#active = true;
             let settled = false;
@@ -65,6 +73,7 @@ export class DialogHost {
             const picker = new Picker({
                 title,
                 items,
+                allowCustomValue,
                 onSelect: (item) => finish({ action: "select", item }),
                 ...(allowDelete
                     ? {

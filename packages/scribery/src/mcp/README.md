@@ -1,152 +1,124 @@
 # MCP interface
 
-The MCP interface exposes Scribery's existing catalogs, immutable index
-builds, and semantic retrieval pipeline to local MCP clients. It uses the stdio
-transport: the client owns the server process and exchanges MCP JSON-RPC messages
-over its stdin and stdout.
-
-Run it directly with either executable:
+Scribery exposes four code-focused tools over stdio. The client owns the server
+process; stdout is reserved for MCP JSON-RPC, with startup failures on stderr.
 
 ```sh
-scribery-mcp --project /path/to/project
-scribery mcp --project /path/to/project
+scribery-mcp --project /path/to/project --profile local-qwen
+# Equivalent:
+scribery mcp --project /path/to/project --profile local-qwen
 ```
 
-`scribery-mcp` is preferred in host configuration because it cannot accidentally
-enter another CLI command. The server never writes banners, progress, or logs to
-stdout. Startup failures are written to stderr.
+Use the absolute path printed by `command -v scribery-mcp` when the MCP host does
+not inherit your interactive shell's PATH.
 
-## Read-only boundary
+## Tools
 
-The first MCP surface intentionally contains only:
+| Tool | Arguments | Behavior |
+| --- | --- | --- |
+| `search_codebase` | `query`, optional `limit`, `compress` | Search the project's active immutable index. |
+| `list_targets` | None | List target names/build IDs and the shared active selection. |
+| `switch_target` | `target` | Activate an existing ready target without rebuilding. |
+| `index_codebase` | Optional `target` | Index the current working tree using saved settings, create or update the destination target, and activate it after success. |
 
-- `list_projects`;
-- `search_codebase`;
-- `inspect_project_chunks`;
-- `list_documentations`;
-- `search_documentation`;
-- `read_documentation_source`.
+All four tools are always advertised. Configure whitelists and approval in your
+MCP client (for example, pi). The former `--tools` option and `retrieval` alias
+have been removed; old startup configurations using `--tools` must be updated.
+Project listing, stored-chunk inspection, and documentation tools are no longer
+part of MCP. Agents should read actual files using their normal codebase tools.
+Documentation remains available through Scribery's other interfaces.
 
-Every tool is advertised as read-only, non-destructive, and idempotent. Project
-and documentation databases are opened in SQLite read-only immutable mode. The
-server exposes no index, create, add, tag, delete, or rebuild operation.
+`search_codebase` and `list_targets` are read tools. `switch_target` changes
+shared project state. `index_codebase` writes index data, calls the saved
+embedding provider, and applies saved retention, which may delete replaced
+builds. Its MCP annotations reflect these effects.
 
-Use `--tools` as a strict allowlist when an MCP client should see only part of
-this surface:
+## Project and target selection
 
-```sh
-scribery-mcp --project /path/to/project --tools search_codebase
-scribery-mcp --tools search_codebase,inspect_project_chunks
-scribery-mcp --tools list_documentations,search_documentation,read_documentation_source
+`--project` accepts a managed project identifier, exact source root, or managed
+database path. Without it, Scribery resolves the project from the server's
+working directory or selects the only available project. There is no per-tool
+project argument; configure the intended project at startup.
+
+Targets are labels for immutable builds, not Git branches. None of these tools
+checks out a branch. Selection is shared with the CLI, TUI, and other MCP
+clients, and is read again for each search. With no stored selection, search
+falls back to the latest ready build.
+
+## Indexing workflow
+
+Configure and index the project once through the CLI/TUI to save its indexing
+recipe. MCP reuses that recipe's provider profile or inline configuration,
+include/exclude rules, dirty-tree policy, encoding, chunk size, and retention.
+MCP startup retrieval options do not override saved indexing settings. Named
+provider profiles are resolved afresh when indexing. MCP does not overwrite the
+manual indexing recipe.
+
+After checking out a task branch, call:
+
+```json
+{"name":"index_codebase","arguments":{}}
 ```
 
-The former allowlist name `retrieval` remains a compatibility alias for
-`search_codebase`, but clients see and call only `search_codebase`.
+The current Git branch name supplies the target. To use a different label:
 
-The option accepts comma-separated names and may be repeated. Unknown or empty
-names stop startup with an error. Excluded tools are not registered and therefore
-do not appear in MCP `tools/list`; this is distinct from Cline's `autoApprove`,
-which controls confirmation but does not define the server's tool surface.
+```json
+{"name":"index_codebase","arguments":{"target":"task/custom-label"}}
+```
 
-Semantic searches still send the query to the embedding model selected by the
-stored build. `--profile` supplies the OpenAI-compatible URL and optional reranker from a
-global provider profile. Explicit `--base-url`, `--rerank-model`, and
-`--rerank-instruction` remain supported when no profile is selected. Provider
-options cannot be mixed with `--profile`.
+An explicit target is required for detached HEAD and plain directories. Target
+names must satisfy Scribery's target-name validation; a branch name that does
+not fit requires an explicit valid label. `live/current` is reserved.
 
-For an authenticated provider, set `OPENAI_COMPATIBLE_API_KEY` in the MCP host's
-server environment. The server sends it as a Bearer token to both the embedding
-and reranking endpoints. The legacy `LM_STUDIO_API_KEY` variable remains a
-fallback. An explicit `--api-key <key>` argument is also supported and takes
-precedence over both environment variables; API keys are never persisted in a
-provider profile.
+The destination is published and activated only after a ready build exists.
+Cancellation, indexing failure, or a detected branch/HEAD change prevents
+publication. The response contains the active target/build, file/chunk and
+embedding counts, plus a diagnostic count and log path when needed. Detailed
+diagnostics remain in the existing indexing logs. Ready but unpublished builds
+can remain after cancellation or a branch change.
+If selection previously fell back to the latest ready build, indexing first
+pins that build so an unpublished build cannot silently become active.
 
-## Scope selection
+Clients requesting MCP progress receive throttled notifications. Indexing
+honors request cancellation; configure the client's request timeout to allow
+indexing to finish. Competing mutations within the server process are rejected
+with a retry message. Stop TUI live indexing before indexing or switching
+targets through MCP; search respects its readiness state.
 
-`--project` accepts a managed project identifier, its exact source root, or its
-managed database path. `search_codebase` deliberately has no project or build
-selector: configure `--project` when starting the server. If no project is
-configured, the server selects the only available project.
+## Search configuration
 
-Documentation selection is explicit. Call `list_documentations` to compare the
-available names and descriptions, then pass the selected name in the required
-`documentation` argument to
-`search_documentation` or `read_documentation_source`. Search returns excerpts
-with source identifiers and documentation-relative paths. Pass either value as
-the read tool's `source` argument. File references found in a source can be
-followed by resolving them to another documentation-relative path and reading
-that path. Reads come from the active immutable build rather than the original
-file, and large sources are paginated by character range.
+Semantic search sends the query to the embedding model for the selected build.
+`--profile` supplies the OpenAI-compatible URL and optional reranker/compression
+settings. Explicit `--base-url`, `--rerank-model`, and `--rerank-instruction` are
+supported when no profile is selected. Provider options cannot be mixed with
+`--profile`.
 
-Project search uses the project's active selection—a named target or a directly
-selected build—and re-reads that selection for every request. A CLI
-`scribery retrieval switch` therefore takes effect without restarting MCP. With no
-stored selection it falls back to the latest ready build for backward
-compatibility. File-chunk inspection can request another ready build. Search and
-chunk-inspection attribution includes the resolved selection and build identifier.
+For authentication, set `OPENAI_COMPATIBLE_API_KEY` in the MCP host environment.
+`LM_STUDIO_API_KEY` remains a fallback; explicit `--api-key` takes precedence.
+The key is also passed to the saved indexing provider and is never persisted in
+a provider profile.
 
-Contextual compression is enabled by default for codebase and documentation
-search. Codebase search retrieves 6 matches by default; documentation retrieves
-10. A configured local model selects exact source passages from distinct matched
-files, under one shared 30-second deadline. Successful files return separate
-excerpt ranges and original-match score metadata; failed files retain original
-matches with fallback diagnostics. `compress: false` disables extraction for one
-request. File-chunk inspection stays paginated, with at most 100 chunks per call.
+Codebase search returns six candidate chunks by default. Scores are ranking
+values, not confidence probabilities. Recent edits may not be indexed; an empty
+result does not prove that code is absent. Search failures include the reason
+and an actionable next step.
 
-Codebase search presents ranked candidates, not verified matches. Scores are labeled
-by their source (vector or reranker) and are not confidence probabilities. No fixed
-score threshold is applied because scoring scales depend on the provider and metric.
-Compressed candidates from the same file are grouped, and the displayed count reflects
-those groups. Failed passage selection is labeled beside the original candidate.
+Contextual compression selects exact source passages under one shared
+30-second deadline. Successful passages from one file are grouped; failed
+selection retains the original candidates with diagnostics. Use
+`compress: false` to return original matches. The server supports
+`--compression-model`, `--compression-base-url`, `--compression-timeout`, and
+`--no-compression`, or saved profile settings. See
+[configuration and limits](../../../scribery-core/src/compression/README.md).
 
-The tool description distinguishes semantic implementation discovery from exact text
-search and states that recent edits may not yet be indexed. An empty result is scoped
-to the searched index; it does not establish that the code is absent. If compression
-selected no passages, the response distinguishes this from retrieval returning no
-candidates. A failure is labelled as a failure, gives the reason, and
-names the next command or setting to fix (`scribery index`, `scribery reindex`,
-`scribery retrieval switch`, the provider `--profile`/`--base-url`, or
-`OPENAI_COMPATIBLE_API_KEY`).
-
-## Cline configuration
-
-Use the absolute path printed by `command -v scribery-mcp`, particularly when
-Cline runs inside a JetBrains GUI process managed outside an interactive shell:
+An example server definition (adapt the enclosing configuration to your host):
 
 ```json
 {
-  "mcpServers": {
-    "scribery": {
-      "type": "stdio",
-      "command": "/absolute/path/to/scribery-mcp",
-      "args": [
-        "--project",
-        "/path/to/project",
-        "--rerank-model",
-        "qwen3-reranker-0.6b",
-        "--tools",
-        "search_codebase"
-      ],
-      "env": {
-        "OPENAI_COMPATIBLE_API_KEY": "your-provider-api-key"
-      },
-      "disabled": false,
-      "timeout": 120,
-      "autoApprove": [
-        "search_codebase"
-      ]
-    }
+  "command": "/absolute/path/to/scribery-mcp",
+  "args": ["--project", "/path/to/project", "--profile", "local-qwen"],
+  "env": {
+    "OPENAI_COMPATIBLE_API_KEY": "your-provider-api-key"
   }
 }
 ```
-
-The configured provider and the build's embedding model must be running when a search tool is
-called. Listing and stored-chunk inspection do not require an embedding model.
-
-## Contextual compression
-
-Searches now select exact source excerpts with a configurable local model after
-reranking. Compression is enabled by default; `compress: false` returns original
-matches for one search. The server accepts `--compression-model`,
-`--compression-base-url`, and `--no-compression`, or saved profile settings.
-See [configuration and limits](../../../scribery-core/src/compression/README.md).

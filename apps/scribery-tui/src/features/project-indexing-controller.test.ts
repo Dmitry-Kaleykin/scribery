@@ -10,6 +10,7 @@ import { CombinedAutocompleteProvider, type SelectItem } from "@earendil-works/p
 import { IndexingPresetService, normalizeRetrievalTargetName, ProviderProfileService, type ProjectIndexingRequest } from "scribery";
 
 import type { ProjectPreferenceInput } from "../domain/project-preferences.js";
+import { Picker } from "../components/picker.js";
 
 import {
     currentGitIndexTarget,
@@ -40,7 +41,8 @@ async function fixture() {
     const presets = new IndexingPresetService({ profilesPath, presetsPath: join(directory, "presets.json") });
     await presets.set({ name: "code", providerProfile: "local" });
     let savedTarget: string | undefined = "release";
-    let selections = ["cancel"];
+    let selections: Array<string | undefined> = ["cancel"];
+    const messages: string[] = [];
     const menus: Array<{ title: string; items: readonly SelectItem[] }> = [];
     const requests: ProjectIndexingRequest[] = [];
     const saved: ProjectPreferenceInput[] = [];
@@ -74,22 +76,42 @@ async function fixture() {
             { name: "release" }, { name: "feature/payments" }, { name: "live/current" },
         ] }) },
         ui: {
-            append() {}, appendError(error: unknown) { throw error; }, requestRender() {},
+            append(message: string) { messages.push(message); },
+            appendError(error: unknown) { throw error; }, requestRender() {},
             async pick(title: string, items: readonly SelectItem[]) {
                 menus.push({ title, items });
                 assert.ok(selections.length, `Unexpected menu: ${title}`);
                 const value = selections.shift();
+                if (value === undefined) return undefined;
                 const item = items.find((choice) => choice.value === value);
                 assert.ok(item, `Missing selection: ${value}`);
                 return item;
             },
-            async input() { return "custom/snapshot"; },
+            async pickOrEnter(title: string, items: readonly SelectItem[]) {
+                menus.push({ title, items });
+                assert.ok(selections.length, `Unexpected input: ${title}`);
+                const value = selections.shift();
+                if (value === undefined) return undefined;
+                if (!value.startsWith("type:")) {
+                    assert.ok(items.some((item) => item.value === value), `Missing target: ${value}`);
+                    return value;
+                }
+                let submitted: string | undefined;
+                const picker = new Picker({
+                    title, items, allowCustomValue: true,
+                    onSelect: (item) => { submitted = item.value; },
+                    onCancel() {}, requestRender() {},
+                });
+                for (const character of value.slice("type:".length)) picker.handleInput(character);
+                picker.handleInput("\r");
+                return submitted;
+            },
         },
     } as unknown as ProjectIndexingControllerOptions);
     return {
-        directory, root, controller, menus, requests, saved, finished: finished.promise,
+        directory, root, controller, menus, requests, saved, messages, finished: finished.promise,
         savedTarget(value: string | undefined) { savedTarget = value; },
-        selections(values: string[]) { selections = values; },
+        selections(values: Array<string | undefined>) { selections = values; },
         proposedTarget() { return menus.at(-1)?.items.find(({ value }) => value === "target")?.description; },
     };
 }
@@ -119,8 +141,8 @@ test("the selected target reaches indexing and is persisted only after a success
     const f = await fixture();
     try {
         await git(f.root, "init", "--initial-branch=feature/payments");
-        f.selections(["start"]);
-        await f.controller.configureAndStart("release/snapshot");
+        f.selections(["target", "type:release/snapshot", "start"]);
+        await f.controller.configureAndStart();
         await f.finished;
         assert.equal(f.requests.length, 1);
         assert.equal(f.requests[0]?.target, "release/snapshot");
@@ -151,12 +173,27 @@ test("branch and target completion keeps the current branch first, deduplicates,
         assert.ok(suggestions?.items[0]);
         assert.deepEqual(provider.applyCompletion([line], 0, line.length, suggestions.items[0], suggestions.prefix).lines,
             ["/index feature/payments"]);
-        f.selections(["target", "target:release", "cancel"]);
+        f.selections(["target", "release", "cancel"]);
         await f.controller.configureAndStart();
         assert.equal(f.proposedTarget(), "release");
-        f.selections(["target", "custom", "cancel"]);
+        f.selections(["target", "type:custom/snapshot", "cancel"]);
         await f.controller.configureAndStart();
         assert.equal(f.proposedTarget(), "custom/snapshot");
+    } finally { await rm(f.directory, { recursive: true, force: true }); }
+});
+
+test("cancelled, empty, invalid, and reserved target input preserve the current target", async () => {
+    const f = await fixture();
+    try {
+        for (const input of [undefined, "type:   ", "type:invalid target", "type:live/current"]) {
+            f.selections(["target", input, "cancel"]);
+            await f.controller.configureAndStart();
+            assert.equal(f.proposedTarget(), "release");
+        }
+        assert.ok(f.messages.some((message) => message.includes("Retrieval target")));
+        assert.ok(f.messages.some((message) => message.includes("reserved")));
+        assert.deepEqual(f.requests, []);
+        assert.deepEqual(f.saved, []);
     } finally { await rm(f.directory, { recursive: true, force: true }); }
 });
 

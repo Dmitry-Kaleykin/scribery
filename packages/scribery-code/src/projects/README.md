@@ -107,11 +107,14 @@ Assigning and switching reject missing or non-ready builds. Manual
 `retrieval set` remains a labeling operation and does not apply index retention
 or delete builds.
 
-MCP reads the active selection before every project search and chunk-inspection
-call. It therefore observes a CLI switch without restarting the MCP process.
-Explicit per-call MCP build selection overrides the active target. With no stored
-selection, retrieval falls back to the newest ready build for backward
-compatibility.
+MCP reads the active selection before every project search. It therefore
+observes a CLI switch without restarting the MCP process.
+MCP exposes `list_targets`, `switch_target`, and `index_codebase` for the project
+configured at startup. Indexing reuses saved settings, defaults its destination
+to the current Git branch name, and creates or updates that target before
+activating it. An explicit target overrides the branch default; detached HEAD
+and plain directories require one. With no stored selection, retrieval falls
+back to the newest ready build for backward compatibility.
 
 Documentation has its own active builds and source tags. Project retrieval
 targets do not participate in documentation lookup, filtering, or lifecycle.

@@ -729,12 +729,12 @@ Retrieval targets:
     scribery retrieval rename <current> <new> [--project <identifier-or-root>]
     scribery retrieval remove <target> [--project <identifier-or-root>]
 
-MCP (read-only stdio):
+MCP (stdio; search, targets, and indexing):
     scribery mcp [--project <identifier-or-root>]
         [--profile <name>]
         [--base-url http://127.0.0.1:1234/v1] [--api-key <key>]
         [--rerank-model <id>]
-        [--rerank-instruction <text>] [--tools <name[,name...]>]
+        [--rerank-instruction <text>]
 
 Set OPENAI_COMPATIBLE_API_KEY only when authentication is enabled. The legacy
 LM_STUDIO_API_KEY name remains supported as a fallback.`);
